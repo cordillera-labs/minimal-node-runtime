@@ -1,0 +1,116 @@
+{
+  "base-files 13.8+deb13u7": {
+    "binaries": [
+      "base-files"
+    ],
+    "downloaded_from": "https://snapshot.debian.org/archive/debian/20260912T120000Z/",
+    "files": [
+      {
+        "asset": "base-files_13.8_deb13u7.dsc",
+        "name": "base-files_13.8+deb13u7.dsc",
+        "sha256": "6240b5a02fc32bd6d925bb7776e00c467e80d930f8cf3c4a20c299ce692dc7e4",
+        "size": 1247
+      },
+      {
+        "asset": "base-files_13.8_deb13u7.tar.xz",
+        "name": "base-files_13.8+deb13u7.tar.xz",
+        "sha256": "be32803b9408ac9aa46b96f68c83ee45e88d04d89854a87999986efc4cb34c69",
+        "size": 83444
+      }
+    ],
+    "release": "24.22.2-trixie-6ebb954932b6",
+    "release_url": "https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/24.22.2-trixie-6ebb954932b6",
+    "snapshot": "https://snapshot.debian.org/archive/debian/20260912T120000Z/",
+    "source": "base-files",
+    "version": "13.8+deb13u7"
+  },
+  "ca-certificates 20250419+deb13u1": {
+    "binaries": [
+      "ca-certificates"
+    ],
+    "downloaded_from": "https://snapshot.debian.org/archive/debian-security/20261021T000000Z/",
+    "files": [
+      {
+        "asset": "ca-certificates_20250419_deb13u1.dsc",
+        "name": "ca-certificates_20250419+deb13u1.dsc",
+        "sha256": "347487e99c0b9f09150c8d78ad03e3552545c3904d5e0d7f731ef2ef79d484d4",
+        "size": 1924
+      },
+      {
+        "asset": "ca-certificates_20250419_deb13u1.tar.xz",
+        "name": "ca-certificates_20250419+deb13u1.tar.xz",
+        "sha256": "1b2e3d0b90cfc62ac8033d64e18ea4649fbb2a01c937c9ac9d36e762da6b9446",
+        "size": 277284
+      }
+    ],
+    "release": "24.22.2-trixie-6ebb954932b6",
+    "release_url": "https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/24.22.2-trixie-6ebb954932b6",
+    "snapshot": "https://snapshot.debian.org/archive/debian-security/20261021T000000Z/",
+    "source": "ca-certificates",
+    "version": "20250419+deb13u1"
+  },
+  "gcc-14 14.2.0-19": {
+    "binaries": [
+      "gcc-14-base",
+      "libgcc-s1",
+      "libstdc++6"
+    ],
+    "downloaded_from": "https://snapshot.debian.org/archive/debian/20260709T000000Z/",
+    "files": [
+      {
+        "asset": "gcc-14_14.2.0-19.debian.tar.xz",
+        "name": "gcc-14_14.2.0-19.debian.tar.xz",
+        "sha256": "31cbab4bafa48aa1c540497bd8098cbcf98e673778f927651ed944709f687781",
+        "size": 2577016
+      },
+      {
+        "asset": "gcc-14_14.2.0-19.dsc",
+        "name": "gcc-14_14.2.0-19.dsc",
+        "sha256": "7db1e202cce66617e9134a662c877a3a773de5b612fd52179815877e0ecfb847",
+        "size": 47347
+      },
+      {
+        "asset": "gcc-14_14.2.0.orig.tar.gz",
+        "name": "gcc-14_14.2.0.orig.tar.gz",
+        "sha256": "e162a5ef3f0077ecae598c6556908d2ab80841532df3398072a96a6df6e6aa29",
+        "size": 94299633
+      }
+    ],
+    "release": "24.22.2-trixie-6ebb954932b6",
+    "release_url": "https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/24.22.2-trixie-6ebb954932b6",
+    "snapshot": "https://snapshot.debian.org/archive/debian/20260709T000000Z/",
+    "source": "gcc-14",
+    "version": "14.2.0-19"
+  },
+  "glibc 2.41-12+deb13u4": {
+    "binaries": [
+      "libc6"
+    ],
+    "downloaded_from": "https://snapshot.debian.org/archive/debian/20260912T120000Z/",
+    "files": [
+      {
+        "asset": "glibc_2.41-12_deb13u4.debian.tar.xz",
+        "name": "glibc_2.41-12+deb13u4.debian.tar.xz",
+        "sha256": "dda4153511bfd543502d18e5bc9323110996fe9c531f14ae3fad6eb17f027c7d",
+        "size": 499524
+      },
+      {
+        "asset": "glibc_2.41-12_deb13u4.dsc",
+        "name": "glibc_2.41-12+deb13u4.dsc",
+        "sha256": "0915324aa646bb99abfaa9aa6ecb734b30babd28454a3e51f3152912370fbd3e",
+        "size": 7576
+      },
+      {
+        "asset": "glibc_2.41.orig.tar.xz",
+        "name": "glibc_2.41.orig.tar.xz",
+        "sha256": "f24aa441021121a79266f0d75242706cab8843a47901fefe74527491807f1998",
+        "size": 20323540
+      }
+    ],
+    "release": "24.22.2-trixie-6ebb954932b6",
+    "release_url": "https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/24.22.2-trixie-6ebb954932b6",
+    "snapshot": "https://snapshot.debian.org/archive/debian/20260912T120000Z/",
+    "source": "glibc",
+    "version": "2.41-12+deb13u4"
+  }
+}
