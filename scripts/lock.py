@@ -18,6 +18,7 @@ Usage:
   lock.py get <lock> <KEY>             print one value
   lock.py inputs-hash <lock>           print the hash of the input keys
   lock.py tag <lock>                   print the immutable image tag
+  lock.py debs <lock>                  print package, version, sha256, url, asset name
   lock.py set <lock> KEY=VALUE...      set keys and rewrite the file
   lock.py build-definition             print the hash of the build definition
 """
@@ -248,9 +249,25 @@ def build_args(lock, packages):
     args = [(key, lock[key]) for key in BUILD_ARG_KEYS]
     for package in packages:
         prefix = f"DEB_{package_key(package)}_"
-        args.append((prefix + "URL", lock[prefix + "URL"]))
         args.append((prefix + "SHA256", lock[prefix + "SHA256"]))
     return args
+
+
+def asset_name(package, version):
+    """The release asset name of a .deb. GitHub rewrites some characters in
+    asset names, so only [A-Za-z0-9._-] stay; the fetcher matches by SHA-256."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", f"{package}_{version}_amd64.deb")
+
+
+def debs(lock, packages):
+    """One (package, version, sha256, url, asset name) per pinned package."""
+    require_complete(lock, packages)
+    rows = []
+    for package in packages:
+        prefix = f"DEB_{package_key(package)}_"
+        rows.append((package, lock[prefix + "VERSION"], lock[prefix + "SHA256"], lock[prefix + "URL"],
+                     asset_name(package, lock[prefix + "VERSION"])))
+    return rows
 
 
 def channel_of(path):
@@ -283,6 +300,9 @@ def main(argv):
         elif command == "build-args":
             for key, value in build_args(lock, packages):
                 print(f"{key}={value}")
+        elif command == "debs":
+            for row in debs(lock, packages):
+                print("\t".join(row))
         elif command == "get":
             print(lock.get(argv[3], ""))
         elif command == "inputs-hash":

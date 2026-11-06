@@ -145,6 +145,8 @@ jobs:
       lock_b64: ${{ needs.publish.outputs.split_lock_b64 }}
       policy: stable-only
       upstream_b64: ${{ needs.plan.outputs.upstream_b64 }}
+      # The sources the first build attached, which are not on main yet.
+      sources_b64: ${{ needs.publish.outputs.sources_b64 }}
 
   record:
     needs: [plan, publish, split]
@@ -172,6 +174,8 @@ jobs:
           SPLIT_RESULT: ${{ needs.split.outputs.result }}
           SPLIT_RELEASE: ${{ needs.split.outputs.release_url }}
           SPLIT_DIGEST: ${{ needs.split.outputs.digest }}
+          FIRST_SOURCES: ${{ needs.publish.outputs.sources_b64 }}
+          SPLIT_SOURCES: ${{ needs.split.outputs.sources_b64 }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           message=$(mktemp)
@@ -185,8 +189,15 @@ jobs:
           }
           : > "$message.body"
           channels=$(write "$FIRST_CHANNEL" "$FIRST_LOCK" "$FIRST_MANIFEST" "$FIRST_RESULT" "$FIRST_RELEASE" "$FIRST_DIGEST")
+          sources=$FIRST_SOURCES
           if [ "$SPLIT_OK" = true ] && [ -n "$SPLIT_LOCK" ]; then
             channels="$channels $(write "$SPLIT_CHANNEL" "$SPLIT_LOCK" "$SPLIT_MANIFEST" "$SPLIT_RESULT" "$SPLIT_RELEASE" "$SPLIT_DIGEST")"
+            # The split run started from the first run's sources, so its set is the newer one.
+            [ -n "$SPLIT_SOURCES" ] && sources=$SPLIT_SOURCES
+          fi
+          if [ -n "$sources" ]; then
+            printf '%s' "$sources" | base64 -d > state/sources.json
+            jq -e 'type == "object"' state/sources.json > /dev/null
           fi
           {
             echo "Record the $(echo "$channels" | tr ' ' '+') publication"

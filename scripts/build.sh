@@ -3,6 +3,10 @@
 #
 #   build.sh <lock> <out-dir>
 #
+# The .deb files come from scripts/fetch-debs.sh into <out-dir>/debs. With
+# DEBS_FROM set to a directory, such as the downloaded .deb assets of a
+# release, the files there are used first when their SHA-256 matches.
+#
 # Writes <out-dir>/image.tar (an OCI archive), <out-dir>/oci (the same OCI
 # layout unpacked, which Trivy reads), <out-dir>/digest (the manifest digest),
 # <out-dir>/rootfs.manifest and <out-dir>/ldd.txt.
@@ -19,10 +23,11 @@ while IFS= read -r arg; do
     build_args+=(--build-arg "$arg")
 done < <(python3 "$root/scripts/lock.py" build-args "$lock")
 python3 "$root/scripts/lock.py" check "$lock"
+"$root/scripts/fetch-debs.sh" "$lock" "$out/debs" "${DEBS_FROM:-}"
 
 builder=()
 [ -n "${BUILDER:-}" ] && builder=(--builder "$BUILDER")
-common=(buildx build "${builder[@]}" --platform linux/amd64 --provenance=false --sbom=false "${build_args[@]}")
+common=(buildx build "${builder[@]}" --platform linux/amd64 --provenance=false --sbom=false "${build_args[@]}" --build-context "debs=$out/debs")
 
 docker "${common[@]}" --target manifest --output "type=local,dest=$out/manifest" "$root"
 mv "$out/manifest/rootfs.manifest" "$out/manifest/ldd.txt" "$out/"

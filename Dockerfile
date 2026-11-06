@@ -16,30 +16,33 @@ FROM ${HELPER_IMAGE} AS assemble
 
 ARG NODE_VERSION
 ARG NODE_SHA256
-ARG DEB_BASE_FILES_URL
 ARG DEB_BASE_FILES_SHA256
-ARG DEB_CA_CERTIFICATES_URL
 ARG DEB_CA_CERTIFICATES_SHA256
-ARG DEB_GCC_14_BASE_URL
 ARG DEB_GCC_14_BASE_SHA256
-ARG DEB_LIBC6_URL
 ARG DEB_LIBC6_SHA256
-ARG DEB_LIBGCC_S1_URL
 ARG DEB_LIBGCC_S1_SHA256
-ARG DEB_LIBSTDCXX6_URL
 ARG DEB_LIBSTDCXX6_SHA256
 ARG SOURCE_DATE_EPOCH
 
-# BuildKit verifies each download against the pinned SHA-256 and fails the
-# build on a mismatch. The Node checksum comes from a SHASUMS256.txt whose
+# BuildKit verifies the Node download against the pinned SHA-256 and fails
+# the build on a mismatch. The checksum comes from a SHASUMS256.txt whose
 # signature scripts/upstream.py verified against node-release-keys.txt.
 ADD --checksum=sha256:${NODE_SHA256} https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz /in/node.tar.gz
-ADD --checksum=sha256:${DEB_BASE_FILES_SHA256} ${DEB_BASE_FILES_URL} /in/debs/base-files.deb
-ADD --checksum=sha256:${DEB_CA_CERTIFICATES_SHA256} ${DEB_CA_CERTIFICATES_URL} /in/debs/ca-certificates.deb
-ADD --checksum=sha256:${DEB_GCC_14_BASE_SHA256} ${DEB_GCC_14_BASE_URL} /in/debs/gcc-14-base.deb
-ADD --checksum=sha256:${DEB_LIBC6_SHA256} ${DEB_LIBC6_URL} /in/debs/libc6.deb
-ADD --checksum=sha256:${DEB_LIBGCC_S1_SHA256} ${DEB_LIBGCC_S1_URL} /in/debs/libgcc-s1.deb
-ADD --checksum=sha256:${DEB_LIBSTDCXX6_SHA256} ${DEB_LIBSTDCXX6_URL} /in/debs/libstdc++6.deb
+
+# The .deb files come from the named context "debs", which
+# scripts/fetch-debs.sh fills from the release assets or snapshot.debian.org.
+# They are checked again here against the SHA-256 values in the lock.
+COPY --from=debs *.deb /in/debs/
+RUN set -eu; cd /in/debs; \
+    printf '%s  %s\n' \
+        "${DEB_BASE_FILES_SHA256}" base-files.deb \
+        "${DEB_CA_CERTIFICATES_SHA256}" ca-certificates.deb \
+        "${DEB_GCC_14_BASE_SHA256}" gcc-14-base.deb \
+        "${DEB_LIBC6_SHA256}" libc6.deb \
+        "${DEB_LIBGCC_S1_SHA256}" libgcc-s1.deb \
+        "${DEB_LIBSTDCXX6_SHA256}" libstdc++6.deb \
+    | sha256sum --strict -c -; \
+    [ "$(ls | wc -l)" = 6 ]
 
 COPY packages.list /in/packages.list
 COPY scripts/assemble-rootfs.sh /in/assemble-rootfs.sh

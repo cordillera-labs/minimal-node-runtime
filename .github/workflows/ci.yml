@@ -113,6 +113,22 @@ jobs:
       - name: Check that every control is rejected
         run: scripts/negative-control.sh check "$RUNNER_TEMP/work/neg" "$RUNNER_TEMP/work/ci.lock"
 
+      - name: Generate the SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/out/a/oci
+          format: cyclonedx
+          output: ${{ runner.temp }}/work/sbom.trivy.cdx.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Merge the bundled components and check them against node
+        run: |
+          work="$RUNNER_TEMP/work"
+          scripts/sbom-bundled.sh minimal-node-runtime:build "$work/sbom.trivy.cdx.json" "$work/ci.lock" \
+            "$(cat "$work/out/digest")" "$work/sbom.cdx.json"
+
       - name: Remove the builders
         if: always()
         run: docker buildx ls --format '{{.Name}}' | grep '^mnr-' | xargs -r -n1 docker buildx rm --force

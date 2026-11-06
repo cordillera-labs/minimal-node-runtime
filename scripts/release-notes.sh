@@ -1,7 +1,7 @@
 #!/bin/bash
 # Writes the release notes for one published digest.
 #
-#   release-notes.sh <lock> <previous-lock> <decision.json> <scan.json> <digest> <tag> <channel>
+#   release-notes.sh <lock> <previous-lock> <decision.json> <scan.json> <digest> <tag> <channel> <sources.json>
 set -euo pipefail
 lock=$1
 previous=$2
@@ -10,6 +10,7 @@ scan=$4
 digest=$5
 tag=$6
 channel=$7
+sources=$8
 image=$(sed -n 's/^IMAGE_REPOSITORY=//p' "$(dirname "$0")/../toolchain.env")
 repo=${GITHUB_REPOSITORY:-cordillera-labs/minimal-node-runtime}
 
@@ -58,7 +59,16 @@ $(diff <(grep -E '^(NODE|HELPER|DEB|BUILD_DEFINITION)_?[A-Z0-9_]*(VERSION|SHA256
 
 Trivy, HIGH and CRITICAL: $(jq '[.Results[]? | .Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length' "$scan") findings, of which $(jq '[.Results[]? | .Vulnerabilities[]? | select((.Severity == "HIGH" or .Severity == "CRITICAL") and (.FixedVersion // "") == "")] | length' "$scan") have no fix. All severities: $(jq '[.Results[]? | .Vulnerabilities[]?] | length' "$scan").
 
-The assets hold the lock (\`inputs.lock\`), the CycloneDX SBOM, the full Trivy report, the rootfs manifest and the upstream state the decision used.
+## Source code
+
+| Source package | Version | Binary packages | Carried by |
+|---|---|---|---|
+$(jq -r --arg tag "$tag" 'to_entries | sort_by(.key)[] | .value
+    | "| \(.source) | \(.version) | \(.binaries | join(", ")) | \(if .release == $tag then "this release" else "[\(.release)](\(.release_url))" end) |"' "$sources")
+
+The Debian source packages above are release assets (\`*.dsc\`, \`*.orig.tar.*\`, \`*.debian.tar.*\`, or a native \`*.tar.xz\`). GitHub rewrites \`+\` in asset names; \`debian-sources.txt\` in the carrying release maps each asset to its Debian file name and SHA-256. The Node.js source is at https://nodejs.org/dist/v$(sed -n 's/^NODE_VERSION=//p' "$lock")/node-v$(sed -n 's/^NODE_VERSION=//p' "$lock").tar.gz.
+
+The assets hold the lock (\`inputs.lock\`), the six \`.deb\` files the image was built from, the CycloneDX SBOM (with the components bundled into node), the full Trivy report, the rootfs manifest and the upstream state the decision used.
 
 ## Verify
 

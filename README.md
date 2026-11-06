@@ -44,13 +44,16 @@ arguments. Without a shell, `CMD` and `HEALTHCHECK` need the exec form.
 | `/usr/lib/x86_64-linux-gnu/` | the dynamic loader, `libc.so.6`, `libm.so.6`, `libdl.so.2`, `libpthread.so.0`, `libstdc++.so.6`, `libgcc_s.so.1` | Debian packages `libc6`, `libstdc++6`, `libgcc-s1` |
 | `/etc/ssl/certs/ca-certificates.crt` | the Mozilla CA bundle | Debian package `ca-certificates` |
 | `/etc/debian_version`, `/etc/os-release` | the OS identity that scanners read | Debian package `base-files` |
-| `/usr/share/doc/<package>/copyright`, `/usr/share/common-licenses/` | the copyright and licence texts of the shipped packages | each package, `gcc-14-base` and `base-files` |
+| `/usr/share/doc/<package>/copyright`, `/usr/share/common-licenses/` | the copyright and licence texts of the shipped packages | each package; `gcc-14-base` holds the copyright file that `libgcc-s1` and `libstdc++6` point to, and `base-files` the common licence texts |
 | `/var/lib/dpkg/status.d/` | one dpkg status entry per shipped package, with the checksums of its shipped files | generated from each package's control data |
 | `/etc/passwd`, `/etc/group`, `/etc/nsswitch.conf` | `root` and `nonroot` (65532:65532), name service from files then DNS | generated |
 | `/tmp` (mode 1777), `/home/nonroot` | writable directories | generated |
 
-The libraries are exactly what the dynamic loader resolves for `node`; the
-build fails if the set differs from the packages in `packages.list`. The
+The image ships six Debian packages, listed in `packages.list`: `base-files`,
+`ca-certificates`, `gcc-14-base`, `libc6`, `libgcc-s1` and `libstdc++6`. Each
+has a dpkg status entry, so a scanner sees all six. The libraries are exactly
+what the dynamic loader resolves for `node`; the build fails if the set differs
+from the packages in `packages.list`. The
 `state/stable.rootfs` file lists every path in the current stable image.
 
 The image runs as `65532:65532`. Not in the image: a shell, `apt`, `dpkg`,
@@ -173,6 +176,25 @@ Trivy scans the Debian packages. It does not see the libraries compiled into the
 `node` binary (OpenSSL, zlib, ICU, libuv and others). Those follow Node.js
 releases, and the Node.js security flag governs their updates.
 
+### Components bundled into node
+
+The SBOM lists the components compiled into the `node` binary, for inventory and
+advisory matching. The publish run reads them from the image's own node
+(`process.versions`) and nests them as CycloneDX components inside one `node`
+component. Each carries its version as node reports it, a package URL, and the
+properties `minimal-node-runtime:source = process.versions` and
+`minimal-node-runtime:bundled-in = node@<version>`.
+
+Scanners may not match CVEs against these components. Most carry a
+`pkg:generic` package URL, and Node.js patches several of them (zlib, for
+example, is a Chromium fork). Security fixes to the bundled libraries arrive
+through Node.js security releases, which skip the cooldown.
+
+The SBOM is deterministic. The same image gives a byte-identical SBOM: the
+serial number and the generated references derive from the image digest, the
+timestamp is `SOURCE_DATE_EPOCH`, and every list is sorted. The SBOM is an
+attestation, not part of the image, so it does not affect the image digest.
+
 ## Verifying a digest
 
 Signatures are keyless (Sigstore Fulcio and Rekor). The signing identity is the
@@ -202,8 +224,10 @@ gh attestation verify "oci://$image" --repo cordillera-labs/minimal-node-runtime
 ```
 
 Each digest also has a GitHub release, named by its immutable tag, with the
-lock (`inputs.lock`), the SBOM, the full Trivy report, the file list and the
-upstream state as assets.
+lock (`inputs.lock`), the six `.deb` files the image was built from, the SBOM,
+the full Trivy report, the file list and the upstream state as assets. The
+release notes list the release that carries the source code of each package
+(see [Source code](#source-code)).
 
 ## Reproducing a digest
 
@@ -211,8 +235,8 @@ Every published digest rebuilds bit for bit from its lock at the commit that
 built it. A weekly workflow checks this for the current stable and candidate
 digests and opens an issue on a mismatch.
 
-You need Docker with buildx, `python3`, `jq`, `git`, and network access to
-nodejs.org, snapshot.debian.org and Docker Hub. The build runs in the BuildKit
+You need Docker with buildx, `python3`, `jq`, `git`, `curl`, and network access
+to nodejs.org, Docker Hub, and either the GitHub release or snapshot.debian.org. The build runs in the BuildKit
 version pinned in `toolchain.env`, which `scripts/reproduce.sh` starts in a
 container.
 
@@ -229,6 +253,22 @@ compares both digests with each other and with `PUBLISHED_DIGEST` in the lock.
 It exits non-zero on any difference. The digest it built is in
 `/tmp/reproduce/digest`.
 
+The `.deb` files download from snapshot.debian.org by default. To build from
+the release assets instead, download them and point `DEBS_FROM` at the
+directory:
+
+```sh
+tag=$(python3 scripts/lock.py get /tmp/stable.lock PUBLISHED_TAG)
+gh release download "$tag" --pattern '*.deb' --dir /tmp/debs
+DEBS_FROM=/tmp/debs scripts/reproduce.sh /tmp/stable.lock /tmp/reproduce
+```
+
+`scripts/fetch-debs.sh` takes each package from `DEBS_FROM` only when the file's
+SHA-256 equals the lock. A missing asset, or one with another SHA-256, falls back
+to the snapshot.debian.org URL in the lock, and that download must match the lock
+too. `/tmp/reproduce/a/debs/sources.txt` says where each file came from. The
+weekly reproduce workflow builds from the release assets in the same way.
+
 For an older digest, take `inputs.lock` from its release and check out the
 release tag, which points at the commit that built it:
 
@@ -241,9 +281,10 @@ cat /tmp/reproduce-old/digest    # compare with the digest in the release notes
 
 What makes the build deterministic:
 
-- every input is pinned by digest or SHA-256, and the Debian packages download
-  from content-addressed snapshot.debian.org URLs, never from a live mirror;
-  no `apt` runs at all;
+- every input is pinned by digest or SHA-256, and the Debian packages come from
+  the release assets or content-addressed snapshot.debian.org URLs, never from
+  a live mirror, and are checked against the lock twice, before and inside the
+  build; no `apt` runs at all;
 - `SOURCE_DATE_EPOCH` is the release time of the newest input that ships,
   read from the lock (the helper image ships no file, so it does not count, and
   a helper refresh alone rebuilds to the same digest);
@@ -266,6 +307,45 @@ components bundled into its binary (`/nodejs/LICENSE`), the GNU C Library,
 the GCC runtime libraries, the Debian CA certificate bundle and Debian's
 base-files. Each package's copyright file is at
 `/usr/share/doc/<package>/copyright`, and the licence texts those files refer
-to are in `/usr/share/common-licenses/`. The source of each Debian package, at
-the exact version in the lock, is on snapshot.debian.org; the Node.js source
-for each release is at `https://nodejs.org/dist/v<version>/node-v<version>.tar.gz`.
+to are in `/usr/share/common-licenses/`.
+
+### Source code
+
+The GNU C Library (LGPL) and the GCC runtime libraries (GPL with the GCC Runtime
+Library Exception) ship in binary form, so their complete corresponding source
+is published with the image. The same applies to the CA certificates and
+base-files.
+
+| Binary packages | Debian source package |
+|---|---|
+| `libc6` | `glibc` |
+| `gcc-14-base`, `libgcc-s1`, `libstdc++6` | `gcc-14` |
+| `ca-certificates` | `ca-certificates` |
+| `base-files` | `base-files` |
+
+A release that first ships a source package version attaches its Debian source
+package as release assets: the `.dsc`, the `.orig` tarball and the `.debian`
+tarball, or the single tarball of a native package. The publish run reads the
+binary-to-source mapping from the Debian Packages index, downloads the files
+from snapshot.debian.org, checks each against the Sources index of the same
+snapshot, and checks each file the `.dsc` lists against the `.dsc` checksums. A
+later release with the same source version does not attach them again; its
+release notes link the release that carries them. `state/sources.json` records
+which release carries each source package.
+
+GitHub rewrites some characters in asset names, such as `+`.
+`debian-sources.txt` in the carrying release maps each asset to its Debian file
+name and SHA-256. To restore the names and unpack a source package:
+
+```sh
+gh release download <tag> --pattern '*' --dir /tmp/src && cd /tmp/src
+grep -v '^#' debian-sources.txt | while read -r sha asset name; do
+  [ "$asset" = "$name" ] || mv "$asset" "$name"
+done
+grep -v '^#' debian-sources.txt | awk '{print $1"  "$3}' | sha256sum -c
+dpkg-source -x glibc_2.41-12+deb13u4.dsc
+```
+
+The Node.js source for each release is at
+`https://nodejs.org/dist/v<version>/node-v<version>.tar.gz`, and each release's
+notes link the exact version.

@@ -27,6 +27,13 @@ on:
         required: false
         type: string
         default: ''
+      sources_b64:
+        description: >-
+          The source packages already carried by a release (state/sources.json),
+          base64-encoded. Empty means state/sources.json at this commit.
+        required: false
+        type: string
+        default: ''
     outputs:
       result:
         description: published or unchanged
@@ -47,6 +54,9 @@ on:
       split_lock_b64:
         description: A stable subset to build next, when the build went to the candidate channel.
         value: ${{ jobs.publish.outputs.split_lock_b64 }}
+      sources_b64:
+        description: state/sources.json after this run, base64-encoded.
+        value: ${{ jobs.publish.outputs.sources_b64 }}
       breaking:
         value: ${{ jobs.publish.outputs.breaking }}
       security_breaking:
@@ -77,6 +87,7 @@ jobs:
       lock_b64: ${{ steps.final.outputs.lock_b64 }}
       manifest_b64: ${{ steps.final.outputs.manifest_b64 }}
       split_lock_b64: ${{ steps.channel.outputs.split_lock_b64 }}
+      sources_b64: ${{ steps.final.outputs.sources_b64 }}
       breaking: ${{ steps.channel.outputs.breaking }}
       security_breaking: ${{ steps.channel.outputs.security_breaking }}
       unfixed_json: ${{ steps.policy.outputs.unfixed_json }}
@@ -95,6 +106,7 @@ jobs:
         env:
           LOCK_B64: ${{ inputs.lock_b64 }}
           UPSTREAM_B64: ${{ inputs.upstream_b64 }}
+          SOURCES_B64: ${{ inputs.sources_b64 }}
           POLICY: ${{ inputs.policy }}
         run: |
           case "$POLICY" in auto | stable-only) ;; *) echo "invalid policy $POLICY"; exit 1 ;; esac
@@ -103,6 +115,14 @@ jobs:
           mkdir -p "$work"
           printf '%s' "$LOCK_B64" | base64 -d > "$work/build.lock"
           printf '%s' "$UPSTREAM_B64" | base64 -d > "$work/upstream.json"
+          if [ -n "$SOURCES_B64" ]; then
+            printf '%s' "$SOURCES_B64" | base64 -d > "$work/known-sources.json"
+          elif [ -f state/sources.json ]; then
+            cp state/sources.json "$work/known-sources.json"
+          else
+            echo '{}' > "$work/known-sources.json"
+          fi
+          jq -e 'type == "object"' "$work/known-sources.json" > /dev/null
           python3 scripts/lock.py check "$work/build.lock"
           {
             echo "tag=$(python3 scripts/lock.py tag "$work/build.lock")"
@@ -259,9 +279,25 @@ jobs:
           scan-type: image
           input: ${{ runner.temp }}/work/out/a/oci
           format: cyclonedx
-          output: ${{ runner.temp }}/work/sbom.cdx.json
+          output: ${{ runner.temp }}/work/sbom.trivy.cdx.json
           exit-code: '0'
           version: ${{ env.TRIVY_VERSION }}
+
+      - name: Add the components bundled into node to the SBOM
+        if: steps.channel.outputs.unchanged != 'true'
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+        run: |
+          work="$RUNNER_TEMP/work"
+          scripts/sbom-bundled.sh minimal-node-runtime:build "$work/sbom.trivy.cdx.json" "$work/build.lock" \
+            "$DIGEST" "$work/sbom.cdx.json"
+
+      - name: Collect the source packages
+        if: steps.channel.outputs.unchanged != 'true'
+        run: |
+          work="$RUNNER_TEMP/work"
+          python3 -I scripts/sources.py collect --lock "$work/build.lock" --known "$work/known-sources.json" \
+            --out "$work/sources"
 
       - name: Log in to GHCR
         if: steps.channel.outputs.unchanged != 'true'
@@ -284,6 +320,8 @@ jobs:
           provenance: false
           sbom: false
           build-args: ${{ steps.setup.outputs.build_args }}
+          # The .deb files that builder A verified and built from.
+          build-contexts: debs=${{ runner.temp }}/work/out/a/debs
           outputs: type=image,name=${{ env.IMAGE_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true,oci-mediatypes=true
 
       - name: Check that the pushed digest is the tested digest
@@ -334,7 +372,7 @@ jobs:
 
       - name: Attest the SBOM
         if: steps.channel.outputs.unchanged != 'true'
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_REPOSITORY }}
           subject-digest: ${{ steps.reproduce.outputs.digest }}
@@ -393,15 +431,28 @@ jobs:
           work="$RUNNER_TEMP/work"
           cp "$work/build.lock" "$work/inputs.lock"
           cp "$work/out/a/rootfs.manifest" "$work/rootfs.manifest"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          # This release carries every source package no earlier release carries.
+          python3 -I scripts/sources.py record --sources "$work/sources/sources.json" --tag "$TAG" --url "$url" \
+            > "$work/sources-final.json"
           scripts/release-notes.sh "$work/build.lock" "state/$CHANNEL.lock" "$work/decision/decision.json" \
-            "$work/scan.json" "$DIGEST" "$TAG" "$CHANNEL" > "$work/notes.md"
+            "$work/scan.json" "$DIGEST" "$TAG" "$CHANNEL" "$work/sources-final.json" > "$work/notes.md"
+          # The six .deb files the image was built from, under GitHub-safe names.
+          mkdir -p "$work/assets"
+          while IFS=$'\t' read -r package _version _sha256 _url asset; do
+            cp "$work/out/a/debs/$package.deb" "$work/assets/$asset"
+          done < <(python3 scripts/lock.py debs "$work/build.lock")
+          if [ -d "$work/sources/files" ]; then
+            cp "$work/sources/files/"* "$work/sources/debian-sources.txt" "$work/assets/"
+          fi
+          cp "$work/sources-final.json" "$work/assets/sources.json"
           prerelease=()
           [ "$CHANNEL" = candidate ] && prerelease=(--prerelease)
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG ($CHANNEL)" \
             --notes-file "$work/notes.md" "${prerelease[@]}" \
             "$work/inputs.lock" "$work/rootfs.manifest" "$work/scan.json#trivy-report.json" \
-            "$work/sbom.cdx.json" "$work/upstream.json"
-          echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_OUTPUT"
+            "$work/sbom.cdx.json" "$work/upstream.json" "$work/assets/"*
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Write the publication record
         id: final
@@ -419,6 +470,7 @@ jobs:
           cp "$work/build.lock" "$final"
           if [ "$UNCHANGED" = true ]; then
             # The same digest is already published; keep its record.
+            cp "$work/known-sources.json" "$work/sources-final.json"
             for key in PUBLISHED_DIGEST PUBLISHED_TAG PUBLISHED_COMMIT PUBLISHED_RELEASE PUBLISHED_RUN; do
               python3 scripts/lock.py set "$final" "$key=$(python3 scripts/lock.py get "state/$CHANNEL.lock" "$key")"
             done
@@ -432,6 +484,7 @@ jobs:
           {
             echo "lock_b64=$(base64 -w0 "$final")"
             echo "manifest_b64=$(base64 -w0 "$work/out/a/rootfs.manifest")"
+            echo "sources_b64=$(base64 -w0 "$work/sources-final.json")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Remove the builders
