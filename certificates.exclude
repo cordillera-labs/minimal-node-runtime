@@ -1,0 +1,8 @@
+# Reviewed exclusions from the Debian ca-certificates package.
+# One exact path per line, relative to /usr/share/ca-certificates:
+#   mozilla/Example_Root_CA.crt
+#
+# The default (with no exclusions) is all roots shipped by the pinned Debian
+# package, matching Debian's initial package configuration. Any named root
+# must exist in that package; a typo or stale exclusion fails the build.
+# Unlike Debian's /etc/ca-certificates.conf, entries here exclude, not include.
