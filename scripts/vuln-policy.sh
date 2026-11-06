@@ -1,7 +1,7 @@
 #!/bin/bash
 # Applies the vulnerability policy to a Trivy JSON report.
 #
-#   vuln-policy.sh <trivy-report.json> <unfixed-out.json>
+#   vuln-policy.sh <scan.json> <unfixed-out.json>
 #
 # A HIGH or CRITICAL finding with a fixed version blocks publishing: exit 1.
 # A HIGH or CRITICAL finding with no fixed version does not block. It is
