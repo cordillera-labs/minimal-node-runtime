@@ -161,7 +161,7 @@ jobs:
 
       - name: Load the image and list its files
         run: |
-          docker load -i "$RUNNER_TEMP/work/out/a/image.tar"
+          scripts/load-image.sh "$RUNNER_TEMP/work/out/a/image.tar" minimal-node-runtime:build
           container=$(docker create minimal-node-runtime:build)
           docker export "$container" | tar -t > "$RUNNER_TEMP/work/listing.txt"
           docker rm "$container"
