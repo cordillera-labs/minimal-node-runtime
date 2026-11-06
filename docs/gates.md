@@ -16,7 +16,11 @@ step publishes nothing. Nothing is pushed before step 13.
    BuildKit then downloads the tarball with `ADD --checksum` and fails on a
    mismatch.
 3. **The `.deb` files.** Each file must match the SHA-256 in the lock, when
-   `scripts/fetch-debs.sh` collects it and again inside the build.
+   `scripts/fetch-debs.sh` collects it and again inside the build. The lock
+   took that SHA-256 from a Packages index that verified against Debian's
+   signed Release file. When the live-archive fallback runs, its Packages index
+   is verified the same way and must list the SHA-256 in the lock. See
+   [Debian archive signatures](#debian-archive-signatures).
 4. **Assembly.** `scripts/assemble-rootfs.sh` ships exactly the libraries that the
    dynamic loader resolves for `node`, and fails on any library outside the
    pinned packages, on any zlib file, and on any file missing from the file list.
@@ -64,8 +68,9 @@ step publishes nothing. Nothing is pushed before step 13.
     [update-policy.md](update-policy.md#channels).
 11. **The SBOM.** The OpenSSL, zlib and ICU versions in the SBOM must equal what
     the image's own `node` reports. See [sbom.md](sbom.md).
-12. **The source packages.** Each Debian source file must match the Sources index
-    and its `.dsc`. See [sources-and-licences.md](sources-and-licences.md).
+12. **The source packages.** Each Debian source file must match the Sources index,
+    which must match the signed Release file, and its `.dsc`. See
+    [sources-and-licences.md](sources-and-licences.md).
 13. **The push.** The image is pushed by digest, with no tag. The pushed digest
     must equal the tested digest, or nothing is signed or tagged.
 14. **Signature and attestations.** The workflow signs the digest, attaches the
@@ -74,11 +79,42 @@ step publishes nothing. Nothing is pushed before step 13.
 15. **The tags.** The tags move. Each tag must then resolve to the tested
     digest.
 
+## Debian archive signatures
+
+`scripts/debian_archive.py` verifies everything the pipeline reads from a
+Debian archive, on deb.debian.org and on snapshot.debian.org alike. It checks
+a chain of three links:
+
+1. **The Release file.** The suite's `InRelease`, or `Release` with
+   `Release.gpg`, verifies with `gpgv` against `debian-archive-keys.asc`. At
+   least one valid signature must come from a primary key listed in
+   `debian-archive-keys.txt`, with a SHA-2 hash. The `Codename` must equal the
+   suite that was asked for.
+2. **The index files.** `Packages.xz` and `Sources.xz` must match the SHA-256
+   and size that the verified Release lists.
+3. **The pool files.** A `.deb` or a source file must match the SHA-256 that
+   the verified index lists.
+
+A missing signature, a bad signature, a signature from a revoked key, or a
+hash mismatch is a fault. The fault fails the step that read the file, and
+names the file. Signatures from keys that are not pinned are ignored, because
+Debian signs each Release file with the keys of more than one release.
+
+`gpgv` accepts a signature from a key that has expired since. This is
+necessary, because snapshot.debian.org serves old Release files unchanged. The
+script accepts such a signature only when it was made before the key expired.
+
+The update run applies the chain when it reads new Debian versions, so each
+SHA-256 in a lock comes from a verified index. The verification runs only in
+the steps that download from Debian. It changes neither the Dockerfile nor a
+build input, so it changes no image digest.
+
 ## Where the checks run
 
 | Check | publish | ci (every pull request) | promote |
 |---|---|---|---|
 | Node.js signature | yes | yes | no |
+| Debian Release signature | yes, on the source packages and the live-archive fallback | yes, on the live-archive fallback | no |
 | double build | yes | yes | no |
 | scanner visibility | yes | yes | yes, on a fresh scan |
 | vulnerability policy | yes | yes | yes, on a fresh scan |
@@ -97,11 +133,12 @@ see what it holds. They do not establish that the inputs are benign.
 
 - **Node.js.** A release that a listed releaser signed is accepted. A compromised
   release key, or malicious code in a signed release, passes every gate.
-- **Debian packages.** The pipeline reads the Packages index from deb.debian.org
-  over HTTPS and checks each `.deb` against its SHA-256. It does not verify the
-  OpenPGP signature on Debian's Release file. An attacker who could serve a false
-  index over HTTPS, and a matching file through snapshot.debian.org or the live
-  archive, could change a package.
+- **Debian packages.** A package is accepted when an index that Debian signed
+  lists it. A compromised Debian archive key, or a malicious package that Debian
+  signed, passes every gate. The pipeline does not check the `Valid-Until`
+  field of a Release file, because snapshot.debian.org serves expired ones.
+  An attacker who could replay an older signed Release file could therefore
+  hold back a newer version, but could not change a file.
 - **The helper image.** `debian:trixie-slim` runs the assembly. It is pinned by
   digest, and a new digest is accepted after the cooldown. Its signature is not
   verified. Both reproducibility builds use the same helper, so the double build

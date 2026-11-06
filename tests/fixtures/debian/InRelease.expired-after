@@ -1,0 +1,22 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: Test
+Label: Test
+Suite: stable
+Codename: trixie
+Date: Thu, 01 Jan 2026 00:00:00 UTC
+Acquire-By-Hash: yes
+Architectures: amd64
+Components: main
+Description: minimal-node-runtime test fixture, not a Debian archive
+SHA256:
+ 76cb80d66ad17adac606f81666292c5a1d1197292ac506d905c9747ab16f8305 232 main/binary-amd64/Packages.xz
+ e6abbd5ec8d04aa2045744578728e8029a487a7c88f4dfa55dbb9962c534a174 288 main/source/Sources.xz
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYKAB0WIQT9yxMxhZDsLGcUNPsh8dNNBWoXEAUCYpasAAAKCRAh8dNNBWoX
+EF58AQDVX1/gh1f0ztyAWERl6FxBHQUZx2ICxpEhJZsl5zdIIgEAx+/ZYn0xKLh/
+5Q3yZmVCgKwRpssD5x71ddqF4rgoFQk=
+=qRs4
+-----END PGP SIGNATURE-----

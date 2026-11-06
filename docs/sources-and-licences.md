@@ -50,10 +50,13 @@ release carries each source package.
 
 The publish workflow reads the binary-to-source mapping from the Debian Packages
 index of the snapshot that lists the pinned version. The mapping comes from
-Debian, not from this repository. It downloads each source file from
-snapshot.debian.org and checks it twice:
+Debian, not from this repository. Each index must match the signed Release file
+of its suite in the same snapshot (see
+[gates.md](gates.md#debian-archive-signatures)). The workflow downloads each
+source file from snapshot.debian.org and checks it twice:
 
-- against the SHA-256 and size in the Sources index of the same snapshot;
+- against the SHA-256 and size in the verified Sources index of the same
+  snapshot;
 - against the checksums in the `.dsc`.
 
 A mismatch fails the publish.

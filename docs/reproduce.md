@@ -14,7 +14,7 @@ stable and candidate digests.
 - An amd64 (x86-64) host. Builds under emulation are not tested.
 - Docker with buildx. `scripts/reproduce.sh` creates its own `docker-container`
   builders that run the BuildKit image pinned in `toolchain.env`.
-- `python3`, `jq`, `git` and `curl`.
+- `python3`, `jq`, `git` and `curl`, and `gpgv` for the live-archive fallback.
 - The [GitHub CLI](https://cli.github.com/), logged in, to download release
   assets.
 - Network access to:
@@ -86,8 +86,11 @@ notes yourself.
    SHA-256 is ignored.
 2. The content-addressed snapshot.debian.org URL in the lock.
 3. If snapshot.debian.org fails, the same version from the live Debian archive
-   of its suite: deb.debian.org for `trixie` and `trixie-updates`,
-   security.debian.org for `trixie-security`.
+   of its suite: deb.debian.org/debian for `trixie` and `trixie-updates`,
+   deb.debian.org/debian-security for `trixie-security`. The suite's Release
+   file must verify against `debian-archive-keys.asc`, its Packages index must
+   match the signed Release, and the index must list the SHA-256 in the lock.
+   See [gates.md](gates.md#debian-archive-signatures).
 
 Every file must match the SHA-256 in the lock, so the source never changes what
 is built. The Dockerfile checks the SHA-256 values a second time, inside the

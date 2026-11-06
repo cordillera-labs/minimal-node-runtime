@@ -10,8 +10,10 @@ binary-to-source mapping comes from Debian, not from this repository.
 
 A source package already in <sources.json> is not downloaded again: a later
 release links the release that carries it. A new one is downloaded from
-snapshot.debian.org. Each file must match the SHA-256 in the Sources index of
-the same snapshot, and each file the .dsc lists must also match the .dsc.
+snapshot.debian.org. Each index read here must match the signed Release file
+of its suite in the same snapshot (scripts/debian_archive.py). Each file must
+match the SHA-256 in the Sources index, and each file the .dsc lists must also
+match the .dsc.
 
 Writes:
   <dir>/files/       the new files, under GitHub-safe asset names
@@ -33,6 +35,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import debian_archive  # noqa: E402
 import lock as lockfile  # noqa: E402
 import upstream  # noqa: E402
 
@@ -48,14 +51,22 @@ class SourceFault(Exception):
 
 
 def fetch(url):
+    """The body, or None on HTTP 404, which is an answer and is not retried."""
     for round_number in range(FETCH_ROUNDS):
         try:
-            return upstream.get(url)
+            return upstream.get_or_none(url)
         except ConnectionError:
             if round_number == FETCH_ROUNDS - 1:
                 raise
             time.sleep(FETCH_BACKOFF_SECONDS * (round_number + 1))
     raise ConnectionError(url)
+
+
+def fetch_file(url):
+    body = fetch(url)
+    if body is None:
+        raise SourceFault(f"{url}: HTTP 404")
+    return body
 
 
 def reuse(path, sha256, size):
@@ -81,11 +92,23 @@ def archive_of(suite):
     raise SourceFault(f"unknown suite {suite}")
 
 
-def index(archive, stamp, suite, path, cache):
-    key = (archive, stamp, suite, path)
+def release(base, suite, cache):
+    """The verified Release of a suite, read once per run."""
+    key = (base, suite)
     if key not in cache:
-        url = f"{upstream.SNAPSHOT}/archive/{archive}/{stamp}/dists/{suite}/{path}"
-        cache[key] = lzma.decompress(fetch(url)).decode()
+        cache[key] = debian_archive.verified_release(fetch, base, suite)
+        if cache[key] is None:
+            raise SourceFault(f"{base}/dists/{suite} has no Release file")
+    return cache[key]
+
+
+def index(archive, stamp, suite, path, cache):
+    """An index of the snapshot at `stamp`, checked against its signed Release."""
+    base = debian_archive.snapshot_base(archive, stamp)
+    key = (base, suite, path)
+    if key not in cache:
+        body = debian_archive.index_file(fetch, release(base, suite, cache), path)
+        cache[key] = lzma.decompress(body).decode()
     return cache[key]
 
 
@@ -156,13 +179,12 @@ def download(archive, stamp, suite, source, version, out_dir, cache):
     dsc_names = [name for name in listed if name.endswith(".dsc")]
     if len(dsc_names) != 1:
         raise SourceFault(f"source {source} {version} lists {len(dsc_names)} .dsc files")
-    base = f"{upstream.SNAPSHOT}/archive/{archive}/{stamp}/{fields['Directory']}"
+    base = f"{debian_archive.snapshot_base(archive, stamp)}/{fields['Directory']}"
     files = []
     contents = {}
     for name, (sha256, size) in sorted(listed.items()):
-        body = reuse(os.path.join(out_dir, asset_name(name)), sha256, size) or fetch(f"{base}/{name}")
-        if hashlib.sha256(body).hexdigest() != sha256 or len(body) != size:
-            raise SourceFault(f"{name} does not match the Sources index of {suite} at {stamp}")
+        body = reuse(os.path.join(out_dir, asset_name(name)), sha256, size) or fetch_file(f"{base}/{name}")
+        debian_archive.check_file(body, sha256, size, f"{name} from the Sources index of {suite} at {stamp}")
         contents[name] = body
     in_dsc = checksums(dsc_fields(contents[dsc_names[0]].decode()).get("Checksums-Sha256", ""))
     if not in_dsc:
@@ -207,7 +229,7 @@ def collect(lock, known, out):
         files = download(entry["archive"], entry["stamp"], entry["suite"], entry["source"], entry["version"],
                          os.path.join(out, "files"), cache)
         result[key] = {"source": entry["source"], "version": entry["version"], "binaries": entry["binaries"],
-                       "snapshot": f"{upstream.SNAPSHOT}/archive/{entry['archive']}/{entry['stamp']}/",
+                       "snapshot": f"{debian_archive.snapshot_base(entry['archive'], entry['stamp'])}/",
                        "files": files, "release": None, "release_url": None}
         lines += [f"{item['sha256']}  {item['asset']}  {item['name']}" for item in files]
     os.makedirs(out, exist_ok=True)
@@ -255,7 +277,7 @@ def main(argv):
                 sources = json.load(handle)
             json.dump(record(sources, args.tag, args.url), sys.stdout, indent=2, sort_keys=True)
             sys.stdout.write("\n")
-    except (SourceFault, lockfile.LockError, ConnectionError, lzma.LZMAError) as fault:
+    except (SourceFault, debian_archive.ArchiveFault, lockfile.LockError, ConnectionError, lzma.LZMAError) as fault:
         print(f"sources.py: {fault}", file=sys.stderr)
         return 1
     return 0

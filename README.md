@@ -84,8 +84,8 @@ what a valid signature does not prove.
   rebuilds only when an input has changed and the change is eligible, so most
   runs publish nothing. GitHub can delay or drop a scheduled run.
 - **Gated.** A build is published only after it passes every gate: the Node.js
-  release signature, a double build, scanner visibility, the vulnerability
-  policy, a smoke test and negative controls. See [docs/gates.md](docs/gates.md).
+  release signature, the Debian archive signature, a double build, scanner
+  visibility, the vulnerability policy, a smoke test and negative controls. See [docs/gates.md](docs/gates.md).
 - **Reproducible.** Two builds in two fresh builders must give the same digest
   before anything is pushed. A weekly workflow rebuilds the current stable and
   candidate digests at the commit that built them, and opens an issue on a
@@ -117,10 +117,12 @@ The full rules: [docs/update-policy.md](docs/update-policy.md).
   snapshot.debian.org fails, a build fetches packages from the live Debian
   archive, which keeps only current versions. An old digest reproduces from the
   release assets or snapshot.debian.org.
-- **Debian packages are trusted through HTTPS, not the archive signature.** The
-  pipeline checks each `.deb` against the SHA-256 in the Packages index it reads
-  from deb.debian.org. It does not verify the OpenPGP signature on Debian's
-  Release file.
+- **Debian packages are trusted as far as Debian's archive keys.** The pipeline
+  verifies each Release file it reads against the pinned Debian 13 archive keys
+  in `debian-archive-keys.asc`, each index against the signed Release, and each
+  `.deb` and source file against its index. A package that Debian signed, or a
+  compromised archive key, passes. See
+  [docs/gates.md](docs/gates.md#debian-archive-signatures).
 
 ## Licence
 

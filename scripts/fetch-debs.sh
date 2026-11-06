@@ -8,8 +8,10 @@
 #      published the lock (gh release download <tag> --pattern '*.deb');
 #   2. the content-addressed snapshot.debian.org URL in the lock;
 #   3. if snapshot fails, the same version from the live Debian archive of the
-#      package's suite (scripts/archive_url.py). The live archive keeps only
-#      current versions, so this helps a current build, not an old one.
+#      package's suite (scripts/archive_url.py). Its Packages index must verify
+#      against the suite's signed Release file and list the SHA-256 in the
+#      lock. The live archive keeps only current versions, so this helps a
+#      current build, not an old one.
 # A file in <assets-dir> with another SHA-256 is ignored. A download with
 # another SHA-256 fails the run. <out-dir>/<package>.deb is the result, and
 # <out-dir>/sources.txt says where each file came from.
@@ -36,7 +38,7 @@ while IFS=$'\t' read -r package version sha256 url _asset suite; do
     else
         if curl -fsSL --retry 3 --retry-all-errors --retry-delay 10 -o "$target.part" "$url"; then
             origin=$url
-        elif live=$(python3 "$root/scripts/archive_url.py" "$package" "$version" "$suite") &&
+        elif live=$(python3 "$root/scripts/archive_url.py" "$package" "$version" "$suite" "$sha256") &&
             curl -fsSL --retry 3 --retry-all-errors --retry-delay 10 -o "$target.part" "$live"; then
             echo "fetch-debs: snapshot failed for $package, used the live archive" >&2
             origin=$live

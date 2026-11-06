@@ -9,7 +9,8 @@ Each channel has a lock file: `state/stable.lock` and, once a candidate exists,
 `state/candidate.lock`. A lock pins every input of the build:
 
 - the Node.js version and the SHA-256 of its `linux-x64` tarball;
-- the version, suite, snapshot.debian.org URL and SHA-256 of each Debian package;
+- the version, suite, snapshot.debian.org URL and SHA-256 of each Debian package,
+  read from a Packages index that verified against Debian's signed Release file;
 - the digest of the `debian:trixie-slim` helper image that assembles the root
   filesystem (its own files do not ship);
 - the hash of the build definition: `Dockerfile`, `packages.list` and
@@ -101,6 +102,38 @@ new releaser needs a change to that file.
 When a signature or checksum does not verify, no Node.js update is accepted that
 hour. The other inputs keep updating. The run opens an issue labelled
 `upstream-signature`.
+
+## Debian archive signatures
+
+The run reads Debian versions only from indexes that verify against Debian's
+signed Release files. This applies to the live Packages indexes, and to the
+snapshot.debian.org indexes that give the release dates.
+[gates.md](gates.md#debian-archive-signatures) describes the chain of checks.
+When a check fails, the run builds nothing, and the run summary names the
+file. No issue is opened; the next run checks again.
+
+### Rotating the Debian archive keys
+
+`debian-archive-keys.asc` holds the public keys and `debian-archive-keys.txt`
+lists their primary fingerprints. A unit test fails unless the two files list
+the same keys. Debian publishes the keys of the next release ahead of time, on
+https://ftp-master.debian.org/keys.html and in the `debian-archive-keyring`
+package, and the Release files of a supported release keep a signature from its
+own keys. A key change is therefore a manual, reviewed change:
+
+1. Download the new key file from https://ftp-master.debian.org/keys.html.
+2. Check its primary fingerprint against `keys.html`, and against the copy in
+   the `debian-archive-keyring` package of a current Debian image, such as
+   `/etc/apt/trusted.gpg.d/` in `debian:trixie-slim`.
+3. Append the key to `debian-archive-keys.asc` and its fingerprint to
+   `debian-archive-keys.txt`, in one pull request.
+4. Remove a key only when no Release file that the pipeline reads depends on it
+   alone. This includes the snapshot.debian.org Release files of every lock that
+   is still rebuilt.
+
+When Debian revokes a key, download the key file again: `gpgv` knows of the
+revocation only from the committed key file. A signature from a revoked key
+fails the run.
 
 ## What never moves automatically
 
