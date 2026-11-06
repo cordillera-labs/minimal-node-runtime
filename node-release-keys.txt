@@ -1,0 +1,16 @@
+# Primary key fingerprints of the Node.js releasers, as listed in the
+# "Release keys" section of https://github.com/nodejs/node/blob/main/README.md
+# A SHASUMS256.txt.asc signature is accepted only when its primary key is listed
+# here. A new releaser needs a reviewed change to this file.
+#
+# The public keys are fetched from this commit of github.com/nodejs/release-keys
+# and checked against the fingerprints below before use.
+RELEASE_KEYS_COMMIT=481637f813e912c4aa3622d7964ab426c97b8e8d
+5BE8A3F6C8A5C01D106C0AD820B1A390B168D356 Antoine du Hamel
+DD792F5973C6DE52C432CBDAC77ABFA00DDBF2B7 Juan José Arboleda
+CC68F5A3106FF448322E48ED27F5E38D5B0A215F Marco Ippolito
+890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4 Rafael Gonzaga
+C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C Richard Lau
+108F52B48DB57BB0CC439B2997B01419BD92F80A Ruy Adorno
+655F3B5C1FB3FA8D1A0CA6BDE4A7D232B936D2FD Stewart X Addison
+A363A499291CBBC940DD62E41F10027AF002F8B0 Ulises Gascón
