@@ -1,5 +1,6 @@
 # Checks a pull request: unit tests, shellcheck, and the full build gate chain
-# on the stable lock with the pull request's build definition. Publishes nothing.
+# on the stable lock of every line with the pull request's build definition.
+# Publishes nothing. The check job passes only when all of them pass.
 name: ci
 
 on:
@@ -8,11 +9,13 @@ on:
 permissions: {}
 
 jobs:
-  check:
+  unit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      lines: ${{ steps.lines.outputs.lines }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -21,18 +24,44 @@ jobs:
 
       - name: Unit tests and shellcheck
         run: |
-          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
           python3 -m unittest discover -s tests -v
           shellcheck scripts/*.sh
 
+      - name: List the lines
+        id: lines
+        run: |
+          lines=$(python3 scripts/lock.py lines)
+          jq -e 'type == "array" and length > 0 and all(test("^[1-9][0-9]{0,2}$"))' <<<"$lines" > /dev/null
+          echo "lines=$lines" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        line: ${{ fromJSON(needs.unit.outputs.lines) }}
+    env:
+      LINE: ${{ matrix.line }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Prepare a lock with this build definition
         run: |
+          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/work"
-          cp state/stable.lock "$RUNNER_TEMP/work/ci.lock"
+          cp "state/$LINE/stable.lock" "$RUNNER_TEMP/work/ci.lock"
           python3 scripts/lock.py set "$RUNNER_TEMP/work/ci.lock" \
             "BUILD_DEFINITION_SHA256=$(python3 scripts/lock.py build-definition)" PUBLISHED_DIGEST=
-          python3 scripts/upstream.py verify-node "$(python3 scripts/lock.py get state/stable.lock NODE_VERSION)" \
-            "$(python3 scripts/lock.py get state/stable.lock NODE_SHA256)"
+          python3 scripts/lock.py check "$RUNNER_TEMP/work/ci.lock" "$LINE"
+          python3 scripts/upstream.py verify-node "$(python3 scripts/lock.py get "state/$LINE/stable.lock" NODE_VERSION)" \
+            "$(python3 scripts/lock.py get "state/$LINE/stable.lock" NODE_SHA256)"
 
       - name: Install the pinned buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -137,3 +166,19 @@ jobs:
           for name in $(docker buildx ls --format '{{.Name}}' | grep '^mnr-' | sort -u); do
             docker buildx rm --force "$name" >/dev/null 2>&1 || true
           done
+
+  check:
+    # The one status to require: unit tests and every line's build passed.
+    needs: [unit, build]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job to pass
+        env:
+          UNIT: ${{ needs.unit.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          echo "unit: $UNIT, build: $BUILD"
+          [ "$UNIT" = success ] && [ "$BUILD" = success ]

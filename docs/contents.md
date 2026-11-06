@@ -2,15 +2,15 @@
 
 What the image holds, why each part is there, and how a scanner sees it.
 
-`state/stable.rootfs` lists every path in the current stable image, with the
-package that owns it and its type. The build writes the same file list as the
+`state/<line>/stable.rootfs` lists every path in a line's current stable
+image, with the package that owns it and its type. The build writes the same file list as the
 `rootfs.manifest` asset of each release.
 
 ## Paths
 
 | Path | Content | Source |
 |---|---|---|
-| `/nodejs/bin/node`, `/nodejs/LICENSE` | the Node.js 22 binary and its licence | the official `node-v22.x.y-linux-x64.tar.gz` from nodejs.org |
+| `/nodejs/bin/node`, `/nodejs/LICENSE` | the Node.js binary of the line (22 or 24) and its licence | the official `node-v<version>-linux-x64.tar.gz` from nodejs.org |
 | `/usr/lib/x86_64-linux-gnu/` | the dynamic loader `ld-linux-x86-64.so.2`, `libc.so.6`, `libm.so.6`, `libdl.so.2`, `libpthread.so.0`, `libstdc++.so.6`, `libgcc_s.so.1` | Debian packages `libc6`, `libstdc++6`, `libgcc-s1` |
 | `/usr/lib64/ld-linux-x86-64.so.2` | a link to the loader, the interpreter path that `node` names | `libc6` |
 | `/bin`, `/lib`, `/lib64` | links to `usr/bin`, `usr/lib`, `usr/lib64` (merged-usr layout) | generated |

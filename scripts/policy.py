@@ -18,7 +18,8 @@ Eligibility (README.md "Update policy" states the same rules for users):
     Trivy reports a CVE against the published stable image whose fixed version
     is at or below the new version, or, for Node.js, when dist/index.json marks
     a release in the update range with "security": true.
-  - Node.js stays on major 22 and Debian stays on trixie. Neither moves here.
+  - Each line stays on its Node.js major (state/22/ on 22.x, state/24/ on
+    24.x) and Debian stays on trixie. Neither moves here.
 
 Channels:
   - A build whose rootfs manifest equals the stable manifest is non-breaking

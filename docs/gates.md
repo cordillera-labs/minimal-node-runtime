@@ -89,8 +89,8 @@ after it leaves a partial publication, which the next run completes.
 
 ## Resuming a partial publish
 
-A run can publish and then fail before the `record` job commits `state/`.
-`state/` then names no publication, so the next run builds the same inputs to
+A run can publish and then fail before the `record` job commits
+`state/<line>/`. The line's state then names no publication, so the next run builds the same inputs to
 the same digest. Steps 14 to 17 make that run complete the publication:
 
 - The push of an existing digest sends the same bytes and changes nothing.

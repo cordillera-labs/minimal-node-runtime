@@ -1,8 +1,9 @@
-# Moves the stable tags (22, 22-trixie) to a published candidate digest, after
-# the candidate has been validated in a consuming stack. This is the only
-# manual step in the update model.
+# Moves a line's stable tags (<line>, <line>-trixie) to that line's published
+# candidate digest, after the candidate has been validated in a consuming
+# stack. This is the only manual step in the update model.
 #
-# It checks that the digest is the current candidate, that it carries its
+# The line is the one whose state/<line>/candidate.lock names the digest. It
+# checks that the digest is that current candidate, that it carries its
 # keyless signature, its scan attestation, its SBOM attestation and its build
 # provenance, and that it passes the gate, the vulnerability policy and the
 # smoke test again. The digest itself never changes; only the tags move.
@@ -41,16 +42,24 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check that the digest is the current candidate
+      - name: Check that the digest is the current candidate of a line
         run: |
           grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "not a digest: $DIGEST"; exit 1; }
-          candidate=$(python3 scripts/lock.py get state/candidate.lock PUBLISHED_DIGEST)
-          if [ "$candidate" != "$DIGEST" ]; then
-            echo "the current candidate is '$candidate'; only the current candidate is promoted"
+          line=
+          for each in $(python3 scripts/lock.py lines | jq -r '.[]'); do
+            [ -f "state/$each/candidate.lock" ] || continue
+            if [ "$(python3 scripts/lock.py get "state/$each/candidate.lock" PUBLISHED_DIGEST)" = "$DIGEST" ]; then
+              line=$each
+            fi
+            echo "node $each: current candidate '$(python3 scripts/lock.py get "state/$each/candidate.lock" PUBLISHED_DIGEST)'"
+          done
+          if [ -z "$line" ]; then
+            echo "$DIGEST is not the current candidate of any line; only a current candidate is promoted"
             exit 1
           fi
-          python3 scripts/lock.py check state/candidate.lock || {
+          echo "LINE=$line" >> "$GITHUB_ENV"
+          python3 scripts/lock.py check "state/$line/candidate.lock" "$line" || {
             echo "the build definition changed since the candidate was built; let the update run rebuild it first"
             exit 1
           }
@@ -100,30 +109,30 @@ jobs:
 
       - name: Gate, policy and smoke test
         run: |
-          scripts/gate.sh "$RUNNER_TEMP/scan.json" state/candidate.lock
+          scripts/gate.sh "$RUNNER_TEMP/scan.json" "state/$LINE/candidate.lock"
           scripts/vuln-policy.sh "$RUNNER_TEMP/scan.json" "$RUNNER_TEMP/unfixed.json"
           docker pull "$IMAGE_REPOSITORY@$DIGEST"
-          scripts/smoke-test.sh "$IMAGE_REPOSITORY@$DIGEST" "$(python3 scripts/lock.py get state/candidate.lock NODE_VERSION)"
+          scripts/smoke-test.sh "$IMAGE_REPOSITORY@$DIGEST" "$(python3 scripts/lock.py get "state/$LINE/candidate.lock" NODE_VERSION)"
 
       - name: Move the stable tags
         run: |
           docker buildx imagetools create --prefer-index=false \
-            -t "$IMAGE_REPOSITORY:22" -t "$IMAGE_REPOSITORY:22-trixie" "$IMAGE_REPOSITORY@$DIGEST"
-          for tag in 22 22-trixie; do
+            -t "$IMAGE_REPOSITORY:$LINE" -t "$IMAGE_REPOSITORY:$LINE-trixie" "$IMAGE_REPOSITORY@$DIGEST"
+          for tag in "$LINE" "$LINE-trixie"; do
             resolved=$(docker buildx imagetools inspect "$IMAGE_REPOSITORY:$tag" --format '{{json .Manifest}}' | jq -r .digest)
             [ "$resolved" = "$DIGEST" ] || { echo "$tag resolves to $resolved"; exit 1; }
           done
 
       - name: Record the promotion
         run: |
-          cp state/candidate.lock state/stable.lock
-          cp state/candidate.rootfs state/stable.rootfs
-          python3 scripts/lock.py set state/stable.lock CHANNEL=stable BREAKING_PACKAGES=
-          tag=$(python3 scripts/lock.py get state/stable.lock PUBLISHED_TAG)
+          cp "state/$LINE/candidate.lock" "state/$LINE/stable.lock"
+          cp "state/$LINE/candidate.rootfs" "state/$LINE/stable.rootfs"
+          python3 scripts/lock.py set "state/$LINE/stable.lock" CHANNEL=stable BREAKING_PACKAGES=
+          tag=$(python3 scripts/lock.py get "state/$LINE/stable.lock" PUBLISHED_TAG)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state/
-          git commit -q -m "Promote $tag to stable" -m "Digest: $DIGEST" -m "Evidence: $RUN_URL"
+          git add "state/$LINE/"
+          git commit -q -m "Promote $tag to node $LINE stable" -m "Digest: $DIGEST" -m "Evidence: $RUN_URL"
           for attempt in 1 2 3; do
             git push origin HEAD:main && break
             [ "$attempt" = 3 ] && exit 1

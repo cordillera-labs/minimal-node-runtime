@@ -3,10 +3,24 @@
 When the image is rebuilt, which channel a build goes to, and what the workflows
 report. `scripts/policy.py` implements these rules and makes no network calls.
 
+## Lines
+
+A line is a Node.js major version with its own directory in `state/`:
+`state/22/` and `state/24/`. Each line has its own locks, file lists, source
+record, tags, releases and issues, and updates independently of the others.
+Every rule below applies to each line on its own. All lines build from the same
+`Dockerfile`, `packages.list` and tool pins.
+
+To add a line, add `state/<major>/stable.lock` with a release of that major
+that has passed its cooldown and verifies against `node-release-keys.txt`. The
+next update run publishes it as the line's first stable build. To retire a
+line, remove its directory: its published digests and tags stay.
+
 ## Inputs
 
-Each channel has a lock file: `state/stable.lock` and, once a candidate exists,
-`state/candidate.lock`. A lock pins every input of the build:
+Each channel of a line has a lock file: `state/<line>/stable.lock` and, once a
+candidate exists, `state/<line>/candidate.lock`. A lock pins every input of the
+build:
 
 - the Node.js version and the SHA-256 of its `linux-x64` tarball;
 - the version, suite, snapshot.debian.org URL and SHA-256 of each Debian package,
@@ -31,18 +45,22 @@ other pins rebuilds to the published digest and publishes nothing new.
 
 `.github/workflows/update.yml` runs at minute 17 of every hour, on `main` only.
 GitHub can delay or drop a scheduled run under load, so "hourly" is the
-schedule, not a guarantee. Each run has these jobs:
+schedule, not a guarantee. It lists the lines and runs
+`.github/workflows/line.yml` once per line, in parallel. A failure in one line
+does not stop another. For each line, these jobs run:
 
-1. **plan**: rescans the published stable digest with a current Trivy database,
+1. **plan**: rescans the line's published stable digest with a current Trivy database,
    reads the current upstream state of every input, and applies the rules below.
 2. **publish**: when a change is eligible, builds the new lock, runs every gate
    and publishes. See [gates.md](gates.md).
 3. **split**: when that build was breaking and went to the candidate channel,
    builds the non-breaking subset for stable.
-4. **record**: commits the published lock and file list to `state/` on `main`.
-5. **report**: opens, updates or closes issues.
-6. **keepalive**: commits a heartbeat when `main` has been quiet. See
-   [Keepalive](#keepalive).
+4. **record**: commits the published lock and file list to `state/<line>/` on
+   `main`.
+5. **report**: opens, updates or closes the line's issues.
+
+After every line, **keepalive** commits a heartbeat when `main` has been quiet.
+See [Keepalive](#keepalive).
 
 The update and promote workflows share one concurrency group, so they never run
 at the same time.
@@ -73,7 +91,7 @@ update. The release date of each input:
 
 The rules per input:
 
-- **Node.js.** The run considers each 22.x release newer than the stable lock
+- **Node.js.** The run considers each release of the line's major newer than the stable lock
   that has a `linux-x64` build. It takes the newest eligible release. Newer
   releases that are still inside the cooldown stay pending.
 - **Debian packages.** The run takes the newest version of each package across
@@ -147,23 +165,25 @@ fails the run.
 
 ## What never moves automatically
 
-- The Node.js major version stays 22.
+- A line's Node.js major version: the 22 line stays on 22.x, the 24 line on
+  24.x.
 - The Debian release stays trixie.
 - The platform stays `linux/amd64`.
 
-The lock accepts no other value for the first two. A move needs a change to this
-repository.
+The update run offers a line only releases of its own major, and the lock
+accepts no Debian release but trixie. A new major is a new line, which needs a
+change to this repository.
 
 ## Breaking and non-breaking changes
 
 Each build writes a file list (`rootfs.manifest`): every path in the image, with
 the package that owns it and its type, and the target of each link. A build is
-**breaking** when its file list differs from `state/stable.rootfs`. A build whose
+**breaking** when its file list differs from its line's `state/<line>/stable.rootfs`. A build whose
 file list is equal is **non-breaking**, even when file contents change.
 
 Examples:
 
-- A new Node.js 22 release or a patched `libc6` at the same paths: non-breaking.
+- A new Node.js release on the line or a patched `libc6` at the same paths: non-breaking.
 - A `libstdc++6` version whose library file has a new name: breaking.
 - A `base-files` version that adds a licence text: breaking.
 - A Node.js release that links a new library, or a change to `packages.list`:
@@ -171,17 +191,20 @@ Examples:
 
 ## Channels
 
+Each line has the same channels, under tags named after its major (`<line>`
+is `22` or `24`):
+
 | Tags | Channel | Receives |
 |---|---|---|
-| `22`, `22-trixie` | stable | non-breaking builds, at once; breaking builds by promotion, or for security |
-| `22-candidate` | candidate | breaking builds, at once; never promoted automatically |
-| `22.<minor>.<patch>-trixie-<hash>` | one build | one digest |
+| `<line>`, `<line>-trixie` | stable | non-breaking builds, at once; breaking builds by promotion, or for security |
+| `<line>-candidate` | candidate | breaking builds, at once; never promoted automatically |
+| `<line>.<minor>.<patch>-trixie-<hash>` | one build | one digest |
 
 `<hash>` is the first 12 hex characters of the SHA-256 over the input keys of the
 lock. The publish workflow sets an immutable tag once, when it publishes the
 digest. A GitHub release of a candidate build is marked as a pre-release.
 
-A breaking build goes to `22-candidate` only, and the run opens an issue
+A breaking build goes to `<line>-candidate` only, and the run opens an issue
 labelled `candidate`. When the breaking part comes from specific packages, the
 same run also builds the other eligible updates without them, for the stable
 channel. That split does not happen when the breaking part comes from the build
@@ -203,8 +226,9 @@ names the release and the breaking packages.
 
 ## Promotion
 
-`.github/workflows/promote.yml` moves `22` and `22-trixie` to a published
-candidate digest. A maintainer runs it by hand after validating the candidate in
+`.github/workflows/promote.yml` moves `<line>` and `<line>-trixie` to a
+published candidate digest of that line. The line is the one whose
+`state/<line>/candidate.lock` names the digest. A maintainer runs it by hand after validating the candidate in
 a consuming stack. It is the only manual step in the update model.
 
 The workflow checks that:
@@ -226,36 +250,37 @@ published. A finding of MEDIUM or LOW severity never blocks.
 
 A HIGH or CRITICAL finding with no fixed version does not block publishing,
 because no fixed package exists to build from. The run opens one issue per
-finding, labelled `unfixed-cve` and keyed by the CVE and the package. It closes
-the issue when the hourly scan of the published stable image no longer reports
-the finding. No VEX statement is generated.
+finding, labelled `unfixed-cve` and keyed by the line, the CVE and the package.
+It closes the issue when the hourly scan of the line's published stable image
+no longer reports the finding. No VEX statement is generated.
 
 ## Issues the workflows open
 
-The workflows report through issues. One open issue exists per title. An update
+The workflows report through issues. One open issue exists per title, and the
+title names the line. An update
 edits the issue body, which sends no notification.
 
 | Label | Opened when | Closed when |
 |---|---|---|
-| `update-failure` | a job of the update run fails | a later run completes without a failure |
+| `update-failure` | a job of a line's update fails | a later run of that line completes without a failure |
 | `upstream-signature` | a Node.js signature or checksum does not verify | by a maintainer |
 | `unfixed-cve` | a HIGH or CRITICAL finding has no fixed version | the hourly scan of the published stable image no longer reports it |
-| `candidate` | a breaking build is published to `22-candidate` | the candidate is promoted |
+| `candidate` | a breaking build is published to `<line>-candidate` | the candidate is promoted |
 | `breaking` | a breaking security fix is published to stable | by a maintainer |
 | `reproducibility` | the weekly rebuild gives another digest, or the registry does not serve it | a later weekly run succeeds |
 
 ## Keepalive
 
 GitHub disables scheduled workflows in a public repository after 60 days without
-repository activity. Each record commit counts as activity. When a run finds no
-eligible change and the last commit on `main` is at least 45 days old, the run
-commits a heartbeat to `state/heartbeat`.
+repository activity. Each record commit counts as activity. When the last commit
+on `main` is at least 45 days old after every line has run, the run commits a
+heartbeat to `state/heartbeat`.
 
 ## Recomputing a decision
 
 The policy is a pure function of its inputs, so a decision can be checked
-afterwards. You need the stable and candidate locks as they stood before the run
-(from the history of `state/` on `main`), the `upstream.json` asset of the
+afterwards. You need the line's stable and candidate locks as they stood before
+the run (from the history of `state/<line>/` on `main`), the `upstream.json` asset of the
 release, and the lock's `EVALUATED_AT`:
 
 ```sh

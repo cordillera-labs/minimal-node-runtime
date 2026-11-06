@@ -1,6 +1,6 @@
-# Weekly: rebuild each published lock from scratch, at the commit that built
-# it, in two fresh builders, and compare with the published digest. A
-# mismatch opens an issue.
+# Weekly: rebuild each published lock of every line from scratch, at the
+# commit that built it, in two fresh builders, and compare with the published
+# digest. A mismatch opens an issue.
 name: reproduce
 
 on:
@@ -11,7 +11,29 @@ on:
 permissions: {}
 
 jobs:
+  locks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      locks: ${{ steps.locks.outputs.locks }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: List the locks of every line
+        id: locks
+        run: |
+          locks=$(python3 scripts/lock.py lines \
+            | jq -c '[.[] | {line: ., channel: ("stable", "candidate")}]')
+          echo "locks=$locks" >> "$GITHUB_OUTPUT"
+          echo "locks: $locks"
+
   reproduce:
+    needs: locks
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -19,7 +41,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        channel: [stable, candidate]
+        lock: ${{ fromJSON(needs.locks.outputs.locks) }}
+    name: reproduce (${{ matrix.lock.line }} ${{ matrix.lock.channel }})
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,16 +53,20 @@ jobs:
       - name: Find the published lock
         id: lock
         env:
-          CHANNEL: ${{ matrix.channel }}
+          LINE: ${{ matrix.lock.line }}
+          CHANNEL: ${{ matrix.lock.channel }}
         run: |
           grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
-          if [ ! -f "state/$CHANNEL.lock" ] || [ -z "$(python3 scripts/lock.py get "state/$CHANNEL.lock" PUBLISHED_DIGEST)" ]; then
-            echo "no published $CHANNEL digest"
+          [[ "$LINE" =~ ^[1-9][0-9]{0,2}$ ]] || { echo "invalid line $LINE"; exit 1; }
+          case "$CHANNEL" in stable | candidate) ;; *) echo "invalid channel $CHANNEL"; exit 1 ;; esac
+          lock="state/$LINE/$CHANNEL.lock"
+          if [ ! -f "$lock" ] || [ -z "$(python3 scripts/lock.py get "$lock" PUBLISHED_DIGEST)" ]; then
+            echo "no published node $LINE $CHANNEL digest"
             exit 0
           fi
-          cp "state/$CHANNEL.lock" "$RUNNER_TEMP/published.lock"
-          echo "commit=$(python3 scripts/lock.py get "state/$CHANNEL.lock" PUBLISHED_COMMIT)" >> "$GITHUB_OUTPUT"
-          echo "tag=$(python3 scripts/lock.py get "state/$CHANNEL.lock" PUBLISHED_TAG)" >> "$GITHUB_OUTPUT"
+          cp "$lock" "$RUNNER_TEMP/published.lock"
+          echo "commit=$(python3 scripts/lock.py get "$lock" PUBLISHED_COMMIT)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(python3 scripts/lock.py get "$lock" PUBLISHED_TAG)" >> "$GITHUB_OUTPUT"
 
       - name: Install the pinned buildx
         if: steps.lock.outputs.commit != ''

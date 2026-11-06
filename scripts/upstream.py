@@ -10,7 +10,7 @@ scripts/plan.py turns into a decision. Nothing here decides eligibility.
 
 Sources:
   Node.js     https://nodejs.org/dist/index.json, plus SHASUMS256.txt.asc for
-              every 22.x release newer than the base lock. The signature must
+              every release of the base lock's major newer than the base lock. The signature must
               come from a key listed in node-release-keys.txt.
   helper      the debian:trixie-slim index digest, by a registry HEAD request.
               On a change, the image config "created" time is read as its
@@ -166,18 +166,29 @@ def node_tarball_sha256(version):
     raise UpstreamFault(f"the signed SHASUMS256.txt of v{version} does not list {name}")
 
 
-def node_releases(base_version):
-    index = json.loads(get("https://nodejs.org/dist/index.json"))
+def line_entries(index, base_version):
+    """The dist/index.json entries a lock can move to: a linux-x64 release of
+    the base version's major, at or after the base version. A line never
+    leaves its major, so a 22.x lock never sees a 24.x release."""
     base = version_tuple(base_version)
-    releases = []
+    major = str(base[0])
+    entries = []
     for entry in index:
         version = entry.get("version", "").lstrip("v")
-        if not re.fullmatch(r"22\.[0-9]+\.[0-9]+", version):
+        if not re.fullmatch(re.escape(major) + r"\.[0-9]+\.[0-9]+", version):
             continue
         if version_tuple(version) < base:
             continue
         if "linux-x64" not in entry.get("files", []):
             continue
+        entries.append((version, entry))
+    return entries
+
+
+def node_releases(base_version):
+    index = json.loads(get("https://nodejs.org/dist/index.json"))
+    releases = []
+    for version, entry in line_entries(index, base_version):
         releases.append({
             "version": version,
             "date": entry["date"],

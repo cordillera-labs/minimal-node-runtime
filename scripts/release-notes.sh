@@ -14,9 +14,10 @@ sources=$8
 image=$(sed -n 's/^IMAGE_REPOSITORY=//p' "$(dirname "$0")/../toolchain.env")
 repo=${GITHUB_REPOSITORY:-cordillera-labs/minimal-node-runtime}
 
+line=$(python3 "$(dirname "$0")/lock.py" line "$lock")
 case "$channel" in
-    stable) tags="\`22\`, \`22-trixie\`, \`$tag\`" ;;
-    candidate) tags="\`22-candidate\`, \`$tag\`" ;;
+    stable) tags="\`$line\`, \`$line-trixie\`, \`$tag\`" ;;
+    candidate) tags="\`$line-candidate\`, \`$tag\`" ;;
 esac
 
 cat <<NOTES

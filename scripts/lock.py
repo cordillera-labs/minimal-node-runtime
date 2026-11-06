@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Read, validate, hash and write the channel lock files in state/.
+"""Read, validate, hash and write the channel lock files in state/<line>/.
+
+A line is a Node.js major version. Each line has its own directory under
+state/, named after the major (state/22/, state/24/), and its locks pin a
+NODE_VERSION of that major. Adding a line means adding its directory with a
+stable lock.
 
 A lock file is KEY=VALUE lines. Three kinds of key exist:
 
@@ -13,7 +18,10 @@ Only input keys enter the inputs hash. Every value is checked against a
 pattern before use, because the values become build arguments and URLs.
 
 Usage:
-  lock.py check <lock>                 validate, and check BUILD_DEFINITION_SHA256
+  lock.py check <lock> [<line>]        validate, check BUILD_DEFINITION_SHA256, and
+                                       that NODE_VERSION belongs to <line>
+  lock.py line <lock>                  print the line: the major of NODE_VERSION
+  lock.py lines                        print the lines under state/, as a JSON array
   lock.py build-args <lock>            print the Dockerfile build arguments
   lock.py get <lock> <KEY>             print one value
   lock.py inputs-hash <lock>           print the hash of the input keys
@@ -25,6 +33,7 @@ Usage:
 
 import datetime
 import hashlib
+import json
 import os
 import re
 import sys
@@ -37,13 +46,14 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD_DEFINITION_FILES = ("Dockerfile", "packages.list", "scripts/assemble-rootfs.sh", "toolchain.env")
 
 SHA256 = r"[0-9a-f]{64}"
+LINE = r"[1-9][0-9]{0,2}"
 DEBIAN_VERSION = r"[0-9][0-9A-Za-z.+~:-]{0,99}"
 
 INPUT_PATTERNS = {
     "BUILD_DEFINITION_SHA256": SHA256,
     "SOURCE_DATE_EPOCH": r"[0-9]{9,11}",
     "HELPER_IMAGE": r"docker\.io/library/debian:trixie-slim@sha256:" + SHA256,
-    "NODE_VERSION": r"22\.[0-9]{1,3}\.[0-9]{1,3}",
+    "NODE_VERSION": LINE + r"\.[0-9]{1,3}\.[0-9]{1,3}",
     "NODE_SHA256": SHA256,
 }
 PACKAGE_INPUT_PATTERNS = {
@@ -59,7 +69,7 @@ RECORD_PATTERNS = {
 PUBLICATION_PATTERNS = {
     "CHANNEL": r"stable|candidate",
     "PUBLISHED_DIGEST": r"sha256:" + SHA256,
-    "PUBLISHED_TAG": r"22\.[0-9]+\.[0-9]+-trixie-[0-9a-f]{12}",
+    "PUBLISHED_TAG": LINE + r"\.[0-9]+\.[0-9]+-trixie-[0-9a-f]{12}",
     "PUBLISHED_COMMIT": r"[0-9a-f]{40}",
     "PUBLISHED_RUN": r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+(/attempts/[0-9]+)?",
     "PUBLISHED_RELEASE": r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/tag/[A-Za-z0-9_.-]+",
@@ -272,6 +282,20 @@ def debs(lock, packages):
     return rows
 
 
+def line_of(lock):
+    """The line of a lock: the major version of its NODE_VERSION."""
+    return lock["NODE_VERSION"].split(".", 1)[0]
+
+
+def lines(root=REPO_ROOT):
+    """The lines that have a directory with a stable lock under state/, in
+    numeric order."""
+    state = os.path.join(root, "state")
+    found = [name for name in os.listdir(state)
+             if re.fullmatch(LINE, name) and os.path.isfile(os.path.join(state, name, "stable.lock"))]
+    return sorted(found, key=int)
+
+
 def channel_of(path):
     name = os.path.basename(path)
     return "candidate" if name.startswith("candidate") else "stable"
@@ -286,6 +310,9 @@ def main(argv):
         if command == "build-definition":
             print(build_definition_hash())
             return 0
+        if command == "lines":
+            print(json.dumps(lines()))
+            return 0
         path = argv[2]
         lock = load(path)
         packages = read_packages()
@@ -294,6 +321,8 @@ def main(argv):
             if lock["SOURCE_DATE_EPOCH"] != derived_epoch(lock):
                 raise LockError(f"SOURCE_DATE_EPOCH is {lock['SOURCE_DATE_EPOCH']}, "
                                 f"but the newest release time gives {derived_epoch(lock)}")
+            if len(argv) > 3 and line_of(lock) != argv[3]:
+                raise LockError(f"NODE_VERSION {lock['NODE_VERSION']} is not on the line {argv[3]}")
             current = build_definition_hash()
             if lock["BUILD_DEFINITION_SHA256"] != current:
                 raise LockError(f"BUILD_DEFINITION_SHA256 is {lock['BUILD_DEFINITION_SHA256']}, "
@@ -309,6 +338,8 @@ def main(argv):
             print(lock.get(argv[3], ""))
         elif command == "inputs-hash":
             print(inputs_hash(lock))
+        elif command == "line":
+            print(line_of(lock))
         elif command == "tag":
             print(image_tag(lock))
         elif command == "set":
