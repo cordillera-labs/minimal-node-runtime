@@ -1,5 +1,6 @@
 // Runs inside the image as its default user: /nodejs/bin/node /smoke/smoke.mjs
 // Each check prints one line. Any failure exits non-zero.
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
@@ -137,6 +138,62 @@ check('HTTPS with only the CA bundle as trust store', async () => {
 check('fetch with the default trust store', async () => {
     const response = await fetch('https://nodejs.org/dist/index.json', { method: 'HEAD' });
     assert.equal(response.status, 200);
+});
+
+
+check('opt-in CA distrust preload and live reload', () => {
+    // The published Node 22/24 binaries support tls.setDefaultCACertificates().
+    // Verify against the actual runtime, not just a mocked unit-test interface.
+    const baseline = tls.getCACertificates('default');
+    assert.ok(baseline.length > 2, 'expected bundled CA roots');
+    const digest = (pem) => crypto.createHash('sha256').update(new crypto.X509Certificate(pem).raw).digest('hex');
+    const first = digest(baseline[0]);
+    const second = digest(baseline[1]);
+    const folder = fs.mkdtempSync('/tmp/mnr-ca-');
+    const policyFile = `${folder}/policy.json`;
+    const policy = (generation, certs) => JSON.stringify({
+        generation, exclude_cert_sha256: certs, exclude_spki_sha256: [],
+    });
+    try {
+        fs.writeFileSync(policyFile, policy(1, [first]));
+        const childCode = `
+            const assert = require('node:assert/strict');
+            const tls = require('node:tls');
+            const fs = require('node:fs');
+            const crypto = require('node:crypto');
+            const digest = (pem) => crypto.createHash('sha256')
+                .update(new crypto.X509Certificate(pem).raw).digest('hex');
+            const accepted = () => new Set(tls.getCACertificates('default').map(digest));
+            assert.ok(!accepted().has(process.env.MNR_FIRST), 'initial root was not excluded');
+            assert.ok(accepted().has(process.env.MNR_SECOND), 'unlisted root was excluded');
+            fs.writeFileSync(process.env.MNR_CA_DISTRUST_FILE, JSON.stringify({
+                generation: 2, exclude_cert_sha256: [process.env.MNR_SECOND],
+                exclude_spki_sha256: [],
+            }));
+            setTimeout(() => {
+                assert.ok(!accepted().has(process.env.MNR_FIRST), 'reload restored old trust');
+                assert.ok(!accepted().has(process.env.MNR_SECOND), 'reload did not remove new root');
+            }, 350);
+        `;
+        const env = {
+            ...process.env,
+            NODE_OPTIONS: '--require=/nodejs/lib/ca-distrust.cjs',
+            MNR_CA_DISTRUST_FILE: policyFile,
+            MNR_CA_DISTRUST_POLL_MS: '100',
+            MNR_FIRST: first,
+            MNR_SECOND: second,
+        };
+        const child = spawnSync(process.execPath, ['-e', childCode], { env, encoding: 'utf8' });
+        assert.equal(child.status, 0, child.stderr || child.stdout);
+
+        // Missing/broken initial policy is not allowed to start an unrestricted app.
+        fs.writeFileSync(policyFile, 'malformed JSON');
+        const invalid = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { env, encoding: 'utf8' });
+        assert.notEqual(invalid.status, 0, 'invalid initial policy started an app');
+        assert.match(invalid.stderr, /CA policy.*not valid JSON/);
+    } finally {
+        fs.rmSync(folder, { recursive: true, force: true });
+    }
 });
 
 let failed = 0;
