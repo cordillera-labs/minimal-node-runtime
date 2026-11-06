@@ -1,8 +1,8 @@
 # minimal-node-runtime
 
 A container base image for Node.js 22 and Node.js 24 applications. Each image
-holds one official Node.js binary, the seven Debian 13 (trixie) shared libraries
-that the binary links, the Mozilla CA bundle and a nonroot user. It is built `FROM scratch` from
+holds one official Node.js binary, the 22 Debian 13 (trixie) shared libraries
+of glibc and the GCC runtime, the Mozilla CA bundle and a nonroot user. It is built `FROM scratch` from
 pinned inputs. Each published digest is signed, carries an SBOM and a build
 provenance attestation, and can be rebuilt bit for bit from this repository. We build
 our own stack on it, and we publish it so that anyone can check how it is made.
@@ -21,11 +21,13 @@ for the first and the latest.
 |---|---|
 | Node.js 22 or 24 | `/nodejs/bin/node` from the official `linux-x64` tarball, and its `LICENSE` |
 | 6 Debian packages | `base-files`, `ca-certificates`, `gcc-14-base`, `libc6`, `libgcc-s1`, `libstdc++6` |
-| 7 shared libraries | the dynamic loader, `libc.so.6`, `libm.so.6`, `libdl.so.2`, `libpthread.so.0`, `libstdc++.so.6`, `libgcc_s.so.1` |
+| 22 shared libraries | every shared library of `libc6` (the dynamic loader, `libc`, `libm`, `libresolv` and 16 more), `libstdc++.so.6` and `libgcc_s.so.1` |
 | CA bundle | `/etc/ssl/certs/ca-certificates.crt`, built from `ca-certificates` |
 | Users | `root` and `nonroot` (65532:65532); the image runs as `nonroot` |
 
-The libraries are exactly the set that the dynamic loader resolves for `node`.
+Each package ships all of its shared libraries, so a native addon finds the libc
+libraries that `node` itself does not link, such as `libresolv.so.2`. glibc's
+`gconv` plug-ins (character set converters for `iconv`) do not ship.
 Each package has a dpkg status entry, so a scanner sees all six.
 
 Not in the image: a shell, `apt`, `dpkg`, `npm`, `corepack`, `tzdata` and the

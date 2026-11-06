@@ -72,6 +72,13 @@ if [ -n "$listing" ]; then
     if grep -E '^(\./)?var/lib/dpkg/status\.d/zlib' "$listing"; then
         fail "a zlib status entry is in the image filesystem"
     fi
+    # libc6 ships every shared library, not only the ones node links. Native
+    # addons need them: the libvips inside sharp needs libresolv.so.2.
+    if grep -qE '^(\./)?usr/lib/x86_64-linux-gnu/libresolv\.so\.2$' "$listing"; then
+        pass "libresolv.so.2 is in the image filesystem"
+    else
+        fail "libresolv.so.2 is missing: libc6 must ship all of its shared libraries"
+    fi
 fi
 
 if [ "$failures" -ne 0 ]; then

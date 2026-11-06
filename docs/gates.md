@@ -22,9 +22,9 @@ after it leaves a partial publication, which the next run completes.
    signed Release file. When the live-archive fallback runs, its Packages index
    is verified the same way and must list the SHA-256 in the lock. See
    [Debian archive signatures](#debian-archive-signatures).
-4. **Assembly.** `scripts/assemble-rootfs.sh` ships exactly the libraries that the
-   dynamic loader resolves for `node`, and fails on any library outside the
-   pinned packages, on any zlib file, and on any file missing from the file list.
+4. **Assembly.** `scripts/assemble-rootfs.sh` ships every shared library of each
+   listed package (read from the file list of its `.deb`), and fails when `node`
+   links a library outside the pinned packages, on any zlib file, and on any file missing from the file list.
    See [contents.md](contents.md#how-the-library-set-is-chosen).
 5. **Reproducibility.** Two builds in two fresh BuildKit builders, with no shared
    cache, must give the same digest and the same file list.
@@ -36,7 +36,8 @@ after it leaves a partial publication, which the next run completes.
    - lists no zlib package.
 
    It also requires that the image filesystem holds no zlib file and no zlib
-   status entry.
+   status entry. It requires `libresolv.so.2` in that filesystem, as the marker of
+   the whole `libc6` library set.
 7. **The vulnerability policy.** No HIGH or CRITICAL finding has a fixed version.
    See [update-policy.md](update-policy.md#the-vulnerability-policy).
 8. **The smoke test.** `tests/smoke.mjs` runs inside the image as its default

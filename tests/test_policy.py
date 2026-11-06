@@ -338,6 +338,20 @@ class Channel(unittest.TestCase):
         decision, _ = policy.channel(lock, base_lock(), dict(self.MANIFEST), self.soname_change(), "stable-only", NOW)
         self.assertEqual(decision["channel"], "fail")
 
+    def test_whole_library_set_of_a_package_goes_to_candidate_and_never_splits(self):
+        # The change that ships every libc6 library adds files and changes the
+        # build definition. It is breaking, and only promotion moves stable.
+        added = dict(self.MANIFEST)
+        for name in ("libresolv.so.2", "libnss_files.so.2", "librt.so.1"):
+            added["usr/lib/x86_64-linux-gnu/" + name] = ("libc6", "file")
+        lock = base_lock()
+        lock["BUILD_DEFINITION_SHA256"] = SHA_B
+        decision, subset = policy.channel(lock, base_lock(), dict(self.MANIFEST), added, "auto", NOW)
+        self.assertEqual((decision["channel"], decision["breaking"], decision["split"]), ("candidate", ["libc6"], False))
+        self.assertIsNone(subset)
+        decision, _ = policy.channel(lock, base_lock(), dict(self.MANIFEST), added, "stable-only", NOW)
+        self.assertEqual(decision["channel"], "fail")
+
     def test_a_breaking_repository_change_never_splits(self):
         lock = self.breaking_lock("security (fixes CVE-2026-1)")
         lock["BUILD_DEFINITION_SHA256"] = SHA_B

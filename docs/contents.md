@@ -11,7 +11,7 @@ image, with the package that owns it and its type. The build writes the same fil
 | Path | Content | Source |
 |---|---|---|
 | `/nodejs/bin/node`, `/nodejs/LICENSE` | the Node.js binary of the line (22 or 24) and its licence | the official `node-v<version>-linux-x64.tar.gz` from nodejs.org |
-| `/usr/lib/x86_64-linux-gnu/` | the dynamic loader `ld-linux-x86-64.so.2`, `libc.so.6`, `libm.so.6`, `libdl.so.2`, `libpthread.so.0`, `libstdc++.so.6`, `libgcc_s.so.1` | Debian packages `libc6`, `libstdc++6`, `libgcc-s1` |
+| `/usr/lib/x86_64-linux-gnu/` | 22 shared libraries: the 20 of `libc6` (see below), `libstdc++.so.6` and `libgcc_s.so.1` | Debian packages `libc6`, `libstdc++6`, `libgcc-s1` |
 | `/usr/lib64/ld-linux-x86-64.so.2` | a link to the loader, the interpreter path that `node` names | `libc6` |
 | `/bin`, `/lib`, `/lib64` | links to `usr/bin`, `usr/lib`, `usr/lib64` (merged-usr layout) | generated |
 | `/etc/ssl/certs/ca-certificates.crt` | the Mozilla CA bundle | built from the certificates in `ca-certificates` |
@@ -37,18 +37,44 @@ for each:
 | `base-files` | `/etc/debian_version` and `/etc/os-release`, which scanners use to detect the OS; the common licence texts |
 | `ca-certificates` | the certificates the CA bundle is built from |
 | `gcc-14-base` | the copyright file that `libgcc-s1` and `libstdc++6` point to: their `/usr/share/doc/<package>` entries are links to `gcc-14-base` |
-| `libc6` | the dynamic loader, `libc`, `libm`, `libdl` and `libpthread` |
+| `libc6` | all 20 of its shared libraries |
 | `libgcc-s1` | `libgcc_s.so.1` |
 | `libstdc++6` | `libstdc++.so.6` |
 
-Only the needed files of each package ship, not the whole package. For example,
-`libc6` contributes the loader and four libraries.
+A package ships its shared libraries, its copyright file and the files named
+above, not the rest of the package.
 
 ## How the library set is chosen
 
-The build does not take a list of libraries from this repository. It asks the
-dynamic loader from the pinned `libc6` which libraries `node` needs, and ships
-exactly those. `scripts/assemble-rootfs.sh` fails the build when:
+The rule: the image ships every shared library of each package in
+`packages.list`. The build does not take a list of libraries from this
+repository. It reads the file list of each pinned `.deb` and ships every path
+that matches `usr/lib/*.so*`, `usr/lib/x86_64-linux-gnu/*.so*` or
+`usr/lib64/*.so*`, with each symlink as the package ships it. The set follows
+every glibc or GCC update with no change here.
+
+For `libc6` in Debian 13 that is 20 libraries: the loader, `libc`, `libm`,
+`libdl`, `libpthread`, `librt`, `libutil`, `libanl`, `libresolv`, `libmvec`,
+`libnsl`, `libBrokenLocale`, `libthread_db`, `libc_malloc_debug`, `libmemusage`,
+`libpcprofile`, and the NSS modules `libnss_files`, `libnss_dns`, `libnss_compat`
+and `libnss_hesiod`. `libstdc++6` and `libgcc-s1` each ship one library, which
+was already the whole set.
+
+The reason: a native addon links libraries that `node` does not. The libvips
+that `sharp` bundles needs `libresolv.so.2`, and the addon fails to load without
+it. These libraries add files but no package, so the scanner sees the same six
+packages.
+
+**The `gconv` modules do not ship.** `libc6` also ships 253 files under
+`usr/lib/x86_64-linux-gnu/gconv/` (8.2 MB). They are plug-ins that glibc loads
+only through the `gconv-modules` configuration, for `iconv` and for character
+sets that glibc does not build in. The rule matches libraries in the library
+directory itself, so these deeper paths stay out. An application that needs them
+needs the configuration as well, and adds both in its own layer. Node.js does
+its text conversion with its built-in ICU.
+
+`scripts/assemble-rootfs.sh` also asks the dynamic loader from the pinned
+`libc6` which libraries `node` needs, and fails the build when:
 
 - the downloaded packages differ from `packages.list`;
 - the loader reports a library as not found;
@@ -69,8 +95,8 @@ exactly those. `scripts/assemble-rootfs.sh` fails the build when:
 - No dpkg log, apt cache, `/var/log` or `ld.so.cache`. The image is `FROM scratch`
   and receives one copy of the assembled root filesystem.
 
-A native addon that links a library outside this set needs its own image layer
-with that library.
+A native addon that links a library from another Debian package needs its own
+image layer with that library.
 
 ## Runtime configuration
 
