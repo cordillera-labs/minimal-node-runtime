@@ -74,8 +74,8 @@ def served_at(base, pool_overrides=None):
     return files
 
 
-class Download(unittest.TestCase):
-    """sources.py against the signed test archive, as if it were snapshot."""
+class SignedArchive(unittest.TestCase):
+    """Trusts the test keys in place of the Debian keys."""
 
     def setUp(self):
         patches = [mock.patch.object(debian_archive, "KEYS", os.path.join(FIXTURES, "keys.asc")),
@@ -86,6 +86,10 @@ class Download(unittest.TestCase):
         out = tempfile.TemporaryDirectory()
         self.addCleanup(out.cleanup)
         self.out = out.name
+
+
+class Download(SignedArchive):
+    """sources.py against the signed test archive, as if it were snapshot."""
 
     def run_with(self, files, *calls):
         with mock.patch.object(sources, "fetch", fake_fetch(files)):
@@ -98,10 +102,11 @@ class Download(unittest.TestCase):
         self.assertEqual(found, ("hello-src", "1.0-1", STAMP))
 
     def test_the_source_files_match_the_verified_sources_index(self):
-        (files,) = self.run_with(served_at(SNAPSHOT_BASE), lambda cache: sources.download(
+        ((files, base),) = self.run_with(served_at(SNAPSHOT_BASE), lambda cache: sources.download(
             "debian", STAMP, "trixie", "hello-src", "1.0-1", self.out, cache))
         self.assertEqual(sorted(item["name"] for item in files),
                          ["hello-src_1.0-1.dsc", "hello-src_1.0.orig.tar.xz"])
+        self.assertEqual(base, SNAPSHOT_BASE)
 
     def test_a_source_file_with_another_hash_is_a_fault(self):
         files = served_at(SNAPSHOT_BASE, {f"{SNAPSHOT_BASE}/{POOL}/hello-src_1.0.orig.tar.xz": b"evil\n"})
@@ -115,6 +120,86 @@ class Download(unittest.TestCase):
         files[url] = files[url].replace(b"Label: Test", b"Label: Tost")
         with self.assertRaises(debian_archive.ArchiveFault):
             self.run_with(files, lambda cache: sources.source_of(
+                "hello", "1.0-1", "debian", "trixie", [STAMP], cache))
+
+
+
+class LiveFallback(SignedArchive):
+    """sources.py when snapshot.debian.org fails: the same checks, against the
+    live archive of the suite."""
+
+    LIVE = debian_archive.live_base("trixie")
+
+    def run_failing(self, files, failing, *calls):
+        requested = []
+
+        def fetch(url):
+            requested.append(url)
+            if any(url.startswith(prefix) for prefix in failing):
+                raise ConnectionError(f"GET {url}: HTTP 503")
+            return files.get(url)
+
+        with mock.patch.object(sources, "fetch", fetch), mock.patch("sys.stderr"):
+            cache = {}
+            return [call(cache) for call in calls], requested
+
+    def both(self, **overrides):
+        return {**served_at(SNAPSHOT_BASE), **served_at(self.LIVE), **overrides}
+
+    def test_a_failing_snapshot_reads_the_verified_live_archive(self):
+        (found, (files, base)), requested = self.run_failing(
+            self.both(), [SNAPSHOT_BASE],
+            lambda cache: sources.source_of("hello", "1.0-1", "debian", "trixie", [STAMP], cache),
+            lambda cache: sources.download("debian", STAMP, "trixie", "hello-src", "1.0-1", self.out, cache))
+        self.assertEqual(found, ("hello-src", "1.0-1", STAMP))
+        self.assertEqual(base, self.LIVE)
+        self.assertEqual(len(files), 2)
+        self.assertIn(f"{self.LIVE}/dists/trixie/InRelease", requested)
+
+    def test_snapshot_is_not_asked_again_after_it_failed(self):
+        _, requested = self.run_failing(
+            self.both(), [SNAPSHOT_BASE],
+            lambda cache: sources.source_of("hello", "1.0-1", "debian", "trixie", [STAMP], cache),
+            lambda cache: sources.download("debian", STAMP, "trixie", "hello-src", "1.0-1", self.out, cache))
+        self.assertEqual([url for url in requested if url.startswith(SNAPSHOT_BASE)],
+                         [f"{SNAPSHOT_BASE}/dists/trixie/InRelease"])
+
+    def test_a_pool_file_that_snapshot_fails_comes_from_the_live_pool(self):
+        tarball = f"{SNAPSHOT_BASE}/{POOL}/hello-src_1.0.orig.tar.xz"
+        ((files, base),), requested = self.run_failing(
+            self.both(), [tarball],
+            lambda cache: sources.download("debian", STAMP, "trixie", "hello-src", "1.0-1", self.out, cache))
+        self.assertEqual(base, SNAPSHOT_BASE)
+        self.assertIn(f"{self.LIVE}/{POOL}/hello-src_1.0.orig.tar.xz", requested)
+        self.assertEqual(len(files), 2)
+
+    def test_a_bad_snapshot_signature_fails_and_does_not_fall_back(self):
+        url = f"{SNAPSHOT_BASE}/dists/trixie/InRelease"
+        files = self.both(**{url: served_at(SNAPSHOT_BASE)[url].replace(b"Label: Test", b"Label: Tost")})
+        with self.assertRaises(debian_archive.ArchiveFault):
+            self.run_failing(files, [], lambda cache: sources.source_of(
+                "hello", "1.0-1", "debian", "trixie", [STAMP], cache))
+
+    def test_a_snapshot_file_with_another_hash_fails_and_does_not_fall_back(self):
+        files = self.both(**{f"{SNAPSHOT_BASE}/{POOL}/hello-src_1.0.orig.tar.xz": b"evil\n"})
+        with self.assertRaisesRegex(debian_archive.ArchiveFault, "the signed index lists"):
+            self.run_failing(files, [], lambda cache: sources.download(
+                "debian", STAMP, "trixie", "hello-src", "1.0-1", self.out, cache))
+
+    def test_a_live_file_with_another_hash_fails(self):
+        files = self.both(**{f"{self.LIVE}/{POOL}/hello-src_1.0.orig.tar.xz": b"evil\n"})
+        with self.assertRaisesRegex(debian_archive.ArchiveFault, "the signed index lists"):
+            self.run_failing(files, [SNAPSHOT_BASE], lambda cache: sources.download(
+                "debian", STAMP, "trixie", "hello-src", "1.0-1", self.out, cache))
+
+    def test_a_version_the_live_archive_no_longer_lists_is_a_fault(self):
+        with self.assertRaisesRegex(sources.SourceFault, "not listed in trixie at the live archive"):
+            self.run_failing(self.both(), [SNAPSHOT_BASE], lambda cache: sources.source_of(
+                "hello", "0.9-1", "debian", "trixie", [STAMP], cache))
+
+    def test_a_live_archive_that_also_fails_raises(self):
+        with self.assertRaises(ConnectionError):
+            self.run_failing(self.both(), [SNAPSHOT_BASE, self.LIVE], lambda cache: sources.source_of(
                 "hello", "1.0-1", "debian", "trixie", [STAMP], cache))
 
 

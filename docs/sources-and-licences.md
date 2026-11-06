@@ -59,6 +59,13 @@ source file from snapshot.debian.org and checks it twice:
   snapshot;
 - against the checksums in the `.dsc`.
 
+When snapshot.debian.org fails after its retries, the rest of the collection
+reads the live Debian archive of the suite: deb.debian.org/debian or
+deb.debian.org/debian-security. Its Release file, its indexes and its files
+pass the same checks. The live archive keeps only current versions, so a
+superseded source version fails the publish until snapshot.debian.org answers.
+`sources.json` records in `downloaded_from` which archive listed the files.
+
 A mismatch fails the publish.
 
 ### Download and unpack a source package

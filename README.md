@@ -114,9 +114,9 @@ The full rules: [docs/update-policy.md](docs/update-policy.md).
   [docs/sbom.md](docs/sbom.md).
 - **amd64 only.** There is no arm64 image.
 - **The live-archive fallback serves current builds only.** When
-  snapshot.debian.org fails, a build fetches packages from the live Debian
-  archive, which keeps only current versions. An old digest reproduces from the
-  release assets or snapshot.debian.org.
+  snapshot.debian.org fails, a build fetches the `.deb` files and the source
+  packages from the live Debian archive, which keeps only current versions. An
+  old digest reproduces from the release assets or snapshot.debian.org.
 - **Debian packages are trusted as far as Debian's archive keys.** The pipeline
   verifies each Release file it reads against the pinned Debian 13 archive keys
   in `debian-archive-keys.asc`, each index against the signed Release, and each
