@@ -7,6 +7,12 @@
 # push is by digest with no tag; the tags move only after the signature and
 # attestations exist.
 #
+# Every publish side effect after the push is resumable. A run that rebuilds
+# the inputs of a partial publish finds the signature, the attestations, the
+# immutable tag and the release that already exist for its digest, keeps them,
+# and creates only what is missing (scripts/publication.py). An existing
+# release or tag that records another digest fails the run.
+#
 # The keyless signing identity is this file at refs/heads/main:
 #   https://github.com/cordillera-labs/minimal-node-runtime/.github/workflows/publish.yml@refs/heads/main
 name: publish
@@ -335,8 +341,58 @@ jobs:
             exit 1
           fi
 
-      - name: Sign the digest (keyless)
+      - name: Find what is already published for this digest
+        id: existing
         if: steps.channel.outputs.unchanged != 'true'
+        # A run that published and then failed before the record step leaves a
+        # publication that state/ does not name. Each part is reused only when
+        # it records this digest; anything else fails here, before the
+        # signature, the tags or the release change.
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+          TAG: ${{ steps.setup.outputs.tag }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          work="$RUNNER_TEMP/work"
+          # Every release, drafts included: the tag endpoint does not return a draft.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$work/releases.pages.json"
+          jq -s '[.[][]]' "$work/releases.pages.json" > "$work/releases.json"
+          release=$(python3 scripts/publication.py release-state --releases "$work/releases.json" --tag "$TAG" \
+            --image "$IMAGE_REPOSITORY" --digest "$DIGEST" --channel "$CHANNEL" --lock "$work/build.lock" \
+            --sources "$work/sources/sources.json")
+          if [ "$release" = present ]; then
+            jq --arg tag "$TAG" '.[] | select(.tag_name == $tag)' "$work/releases.json" > "$work/release.json"
+            mkdir -p "$work/released"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$work/released" \
+              --pattern inputs.lock --pattern sbom.cdx.json --pattern sources.json
+            python3 scripts/publication.py release-match --assets "$work/released" --tag "$TAG" \
+              --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" --digest "$DIGEST" \
+              --lock "$work/build.lock" --sources "$work/sources/sources.json" > "$work/released-sources.json"
+          fi
+          tag=$(python3 scripts/publication.py tag-state --repository "$IMAGE_REPOSITORY" --tag "$TAG" --digest "$DIGEST")
+          {
+            echo "release=$release"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Already published for $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "- release $TAG: $release" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tag $TAG: $tag" >> "$GITHUB_STEP_SUMMARY"
+          # A check that does not verify counts as missing, and the step below
+          # creates it. The final verification checks all four either way.
+          for check in signature vuln provenance sbom; do
+            state=absent
+            if scripts/verify-published.sh "$check" "$IMAGE_REPOSITORY@$DIGEST"; then
+              state=present
+            fi
+            echo "$check=$state" >> "$GITHUB_OUTPUT"
+            echo "- $check: $state" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Sign the digest (keyless)
+        if: steps.channel.outputs.unchanged != 'true' && steps.existing.outputs.signature != 'present'
         env:
           DIGEST: ${{ steps.reproduce.outputs.digest }}
         run: |
@@ -346,7 +402,7 @@ jobs:
             "$COSIGN_IMAGE" sign --yes "$IMAGE_REPOSITORY@$DIGEST"
 
       - name: Attest the scan result
-        if: steps.channel.outputs.unchanged != 'true'
+        if: steps.channel.outputs.unchanged != 'true' && steps.existing.outputs.vuln != 'present'
         env:
           DIGEST: ${{ steps.reproduce.outputs.digest }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -363,7 +419,7 @@ jobs:
             "$COSIGN_IMAGE" attest --yes --type vuln --predicate /work/vuln-predicate.json "$IMAGE_REPOSITORY@$DIGEST"
 
       - name: Attest the build provenance
-        if: steps.channel.outputs.unchanged != 'true'
+        if: steps.channel.outputs.unchanged != 'true' && steps.existing.outputs.provenance != 'present'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_REPOSITORY }}
@@ -371,7 +427,7 @@ jobs:
           push-to-registry: true
 
       - name: Attest the SBOM
-        if: steps.channel.outputs.unchanged != 'true'
+        if: steps.channel.outputs.unchanged != 'true' && steps.existing.outputs.sbom != 'present'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_REPOSITORY }}
@@ -385,18 +441,9 @@ jobs:
           DIGEST: ${{ steps.reproduce.outputs.digest }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/publish\.yml@refs/heads/main$"
-          for check in verify "verify-attestation --type vuln"; do
-            # shellcheck disable=SC2086
-            docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e DOCKER_CONFIG=/docker-config -v "$HOME/.docker:/docker-config:ro" \
-              "$COSIGN_IMAGE" $check "$IMAGE_REPOSITORY@$DIGEST" \
-              --certificate-identity-regexp "$identity" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          for check in signature vuln provenance sbom; do
+            scripts/verify-published.sh "$check" "$IMAGE_REPOSITORY@$DIGEST"
           done
-          signer="$GITHUB_REPOSITORY/.github/workflows/publish.yml"
-          gh attestation verify "oci://$IMAGE_REPOSITORY@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer"
-          gh attestation verify "oci://$IMAGE_REPOSITORY@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer" \
-            --predicate-type https://cyclonedx.org/bom
 
       - name: Move the tags
         if: steps.channel.outputs.unchanged != 'true'
@@ -404,6 +451,9 @@ jobs:
           DIGEST: ${{ steps.reproduce.outputs.digest }}
           TAG: ${{ steps.setup.outputs.tag }}
           CHANNEL: ${{ steps.channel.outputs.channel }}
+        # The immutable tag is absent or names this digest: the step that found
+        # what is already published fails on any other digest. Setting a tag to
+        # the digest it already names changes nothing.
         run: |
           case "$CHANNEL" in
             stable) tags="$TAG 22 22-trixie" ;;
@@ -425,13 +475,28 @@ jobs:
           DIGEST: ${{ steps.reproduce.outputs.digest }}
           TAG: ${{ steps.setup.outputs.tag }}
           CHANNEL: ${{ steps.channel.outputs.channel }}
+          RELEASE: ${{ steps.existing.outputs.release }}
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           work="$RUNNER_TEMP/work"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          if [ "$RELEASE" = present ]; then
+            # An earlier run published this digest with this release. Keep the
+            # release, its source record, and the commit and run it names.
+            cp "$work/released-sources.json" "$work/sources-final.json"
+            mapfile -t record < <(python3 scripts/publication.py release-record --release "$work/release.json")
+            [ "${#record[@]}" = 2 ] || { echo "the release $TAG names no commit and run"; exit 1; }
+            {
+              echo "url=$url"
+              echo "commit=${record[0]}"
+              echo "run=${record[1]}"
+            } >> "$GITHUB_OUTPUT"
+            echo "- reused the release $TAG, published by ${record[1]}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           cp "$work/build.lock" "$work/inputs.lock"
           cp "$work/out/a/rootfs.manifest" "$work/rootfs.manifest"
-          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
           # This release carries every source package no earlier release carries.
           python3 -I scripts/sources.py record --sources "$work/sources/sources.json" --tag "$TAG" --url "$url" \
             > "$work/sources-final.json"
@@ -452,7 +517,11 @@ jobs:
             --notes-file "$work/notes.md" "${prerelease[@]}" \
             "$work/inputs.lock" "$work/rootfs.manifest" "$work/scan.json#trivy-report.json" \
             "$work/sbom.cdx.json" "$work/upstream.json" "$work/assets/"*
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          {
+            echo "url=$url"
+            echo "commit=$GITHUB_SHA"
+            echo "run=$RUN_URL"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Write the publication record
         id: final
@@ -463,7 +532,8 @@ jobs:
           BREAKING: ${{ steps.channel.outputs.breaking }}
           UNCHANGED: ${{ steps.channel.outputs.unchanged }}
           RELEASE_URL: ${{ steps.release.outputs.url }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_RUN: ${{ steps.release.outputs.run }}
         run: |
           work="$RUNNER_TEMP/work"
           final="$work/$CHANNEL.lock"
@@ -476,8 +546,10 @@ jobs:
             done
             echo "result=unchanged" >> "$GITHUB_OUTPUT"
           else
+            # The commit and run that created the release, which is this run
+            # unless it resumed an earlier one.
             python3 scripts/lock.py set "$final" "PUBLISHED_DIGEST=$DIGEST" "PUBLISHED_TAG=$TAG" \
-              "PUBLISHED_COMMIT=$GITHUB_SHA" "PUBLISHED_RELEASE=$RELEASE_URL" "PUBLISHED_RUN=$RUN_URL"
+              "PUBLISHED_COMMIT=$RELEASE_COMMIT" "PUBLISHED_RELEASE=$RELEASE_URL" "PUBLISHED_RUN=$RELEASE_RUN"
             echo "result=published" >> "$GITHUB_OUTPUT"
           fi
           python3 scripts/lock.py set "$final" "CHANNEL=$CHANNEL" "BREAKING_PACKAGES=$BREAKING"
@@ -489,4 +561,9 @@ jobs:
 
       - name: Remove the builders
         if: always()
-        run: docker buildx ls --format '{{.Name}}' | grep '^mnr-' | xargs -r -n1 docker buildx rm --force
+        # Cleanup never fails the job: the build scripts may already have
+        # removed a builder, and buildx ls can list a name more than once.
+        run: |
+          for name in $(docker buildx ls --format '{{.Name}}' | grep '^mnr-' | sort -u); do
+            docker buildx rm --force "$name" >/dev/null 2>&1 || true
+          done
