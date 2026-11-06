@@ -202,11 +202,16 @@ def render(lock, channel, packages):
     return "\n".join(lines) + "\n"
 
 
+# The helper image assembles the rootfs but ships no file, so its release time
+# stays out of the epoch: a helper refresh then rebuilds to the same digest.
+EPOCH_EXCLUDED = ("HELPER_IMAGE_RELEASED",)
+
+
 def release_times(lock):
-    """Every *_RELEASED value of the lock, as aware datetimes."""
+    """The *_RELEASED values of the inputs that ship, as aware datetimes."""
     times = []
     for key, value in lock.items():
-        if key.endswith("_RELEASED") and value:
+        if key.endswith("_RELEASED") and value and key not in EPOCH_EXCLUDED:
             if len(value) == 10:
                 value += "T00:00:00Z"
             trimmed = value.rstrip("Z").split(".", 1)[0]
@@ -216,8 +221,8 @@ def release_times(lock):
 
 
 def derived_epoch(lock):
-    """SOURCE_DATE_EPOCH: the release time of the newest input. A pure
-    function of the lock, so the same lock always builds the same digest."""
+    """SOURCE_DATE_EPOCH: the release time of the newest input that ships. A
+    pure function of the lock, so the same lock always builds the same digest."""
     times = release_times(lock)
     if not times:
         raise LockError("the lock records no release time, so SOURCE_DATE_EPOCH cannot be derived")

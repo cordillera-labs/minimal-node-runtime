@@ -244,8 +244,9 @@ What makes the build deterministic:
 - every input is pinned by digest or SHA-256, and the Debian packages download
   from content-addressed snapshot.debian.org URLs, never from a live mirror;
   no `apt` runs at all;
-- `SOURCE_DATE_EPOCH` is the release time of the newest input, read from the
-  lock;
+- `SOURCE_DATE_EPOCH` is the release time of the newest input that ships,
+  read from the lock (the helper image ships no file, so it does not count, and
+  a helper refresh alone rebuilds to the same digest);
 - every file's mtime is set to `SOURCE_DATE_EPOCH`, BuildKit rewrites the layer
   timestamps (`rewrite-timestamp=true`), and the image `created` time and
   history use the same epoch;

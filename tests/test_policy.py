@@ -265,8 +265,13 @@ class Epoch(unittest.TestCase):
         self.assertEqual(lockfile.derived_epoch(lock), "1792454400")
 
     def test_fractional_seconds_are_truncated(self):
-        lock = {"HELPER_IMAGE_RELEASED": "2026-11-04T21:23:39.987654321Z"}
+        lock = {"DEB_LIBC6_RELEASED": "2026-11-04T21:23:39.987654321Z"}
         self.assertEqual(lockfile.derived_epoch(lock), "1793827419")
+
+    def test_the_helper_image_does_not_move_the_epoch(self):
+        lock = base_lock()
+        newer_helper = dict(lock, HELPER_IMAGE=HELPER_B, HELPER_IMAGE_RELEASED=days_ago(0))
+        self.assertEqual(lockfile.derived_epoch(newer_helper), lockfile.derived_epoch(lock))
 
     def test_no_release_time_is_a_fault(self):
         with self.assertRaises(lockfile.LockError):
