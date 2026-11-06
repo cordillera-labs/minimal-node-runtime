@@ -114,9 +114,10 @@ snapshot.debian.org.
   filesystem. It holds no dpkg log, apt cache, `/var/log` or `ld.so.cache`.
 - The build exports no provenance or SBOM attestation into the image index.
   Those are attached after the push, so they do not change the digest.
-- CI pins the BuildKit image and the buildx version in `toolchain.env`.
-  `scripts/reproduce.sh` uses the pinned BuildKit image, and the buildx version
-  on your machine.
+- CI pins the BuildKit image and the buildx version in `toolchain.env`, which is
+  part of the build definition hash in the lock. A lock therefore names the
+  BuildKit that built it. `scripts/reproduce.sh` uses the pinned BuildKit image,
+  and the buildx version on your machine.
 
 ## What the weekly check covers
 

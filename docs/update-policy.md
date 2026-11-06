@@ -13,17 +13,19 @@ Each channel has a lock file: `state/stable.lock` and, once a candidate exists,
   read from a Packages index that verified against Debian's signed Release file;
 - the digest of the `debian:trixie-slim` helper image that assembles the root
   filesystem (its own files do not ship);
-- the hash of the build definition: `Dockerfile`, `packages.list` and
-  `scripts/assemble-rootfs.sh`.
+- the hash of the build definition: `Dockerfile`, `packages.list`,
+  `scripts/assemble-rootfs.sh` and `toolchain.env`.
 
 For each input, the lock also records its release date and why it was accepted
 (`*_RELEASED`, `*_ACCEPTED`), and the time of the decision (`EVALUATED_AT`). After
 a publication it records the digest, tag, commit, release and run
 (`PUBLISHED_*`).
 
-The tool pins in `toolchain.env` (BuildKit, buildx, Trivy, cosign) are not lock
-inputs. A change to them does not start a build by itself. The next build that
-an input change starts uses the new pins.
+The tool pins in `toolchain.env` (BuildKit, buildx, Trivy, cosign) are part of
+the build definition. A change to them is a build definition change, so the
+next update run rebuilds with the new pins. A BuildKit or buildx change can
+change the layer bytes, and so the digest, of the same inputs. A change to the
+other pins rebuilds to the published digest and publishes nothing new.
 
 ## The hourly run
 
@@ -262,4 +264,5 @@ script applies the cooldown to those updates, so its result can differ.
 
 Every GitHub Action is pinned by commit SHA. Dependabot proposes Action updates
 monthly, with a 7-day cooldown, and never merges them. CI checks each pull
-request. The tool versions in `toolchain.env` are changed by hand.
+request. The tool versions in `toolchain.env` are changed by hand, and the
+next update run rebuilds with them.

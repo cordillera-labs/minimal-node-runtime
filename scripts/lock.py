@@ -32,7 +32,9 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The files whose content defines the image, apart from the lock inputs.
-BUILD_DEFINITION_FILES = ("Dockerfile", "packages.list", "scripts/assemble-rootfs.sh")
+# toolchain.env pins BuildKit, which fixes the layer bytes, so a tool bump is
+# a build definition change and the next update run rebuilds.
+BUILD_DEFINITION_FILES = ("Dockerfile", "packages.list", "scripts/assemble-rootfs.sh", "toolchain.env")
 
 SHA256 = r"[0-9a-f]{64}"
 DEBIAN_VERSION = r"[0-9][0-9A-Za-z.+~:-]{0,99}"
