@@ -525,7 +525,7 @@ jobs:
           [ "$CHANNEL" = candidate ] && prerelease=(--prerelease)
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG ($CHANNEL)" \
             --notes-file "$work/notes.md" "${prerelease[@]}" \
-            "$work/inputs.lock" "$work/rootfs.manifest" "$work/scan.json#trivy-report.json" \
+            "$work/inputs.lock" "$work/rootfs.manifest" "$work/scan.json" \
             "$work/sbom.cdx.json" "$work/upstream.json" "$work/assets/"*
           {
             echo "url=$url"

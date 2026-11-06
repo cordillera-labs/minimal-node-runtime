@@ -107,7 +107,7 @@ assets:
 |---|---|
 | `inputs.lock` | the lock the image was built from |
 | `rootfs.manifest` | every path in the image, with its owner and type |
-| `trivy-report.json` | the full Trivy report from publication |
+| `scan.json` | the full Trivy report from publication |
 | `sbom.cdx.json` | the CycloneDX SBOM |
 | `upstream.json` | the upstream state the update decision used |
 | `sources.json` | which release carries each Debian source package |

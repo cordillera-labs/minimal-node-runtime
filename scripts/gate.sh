@@ -4,7 +4,7 @@
 # Without this check, a rootfs that Trivy cannot identify scans as "OS none"
 # with zero findings, which reads as a pass.
 #
-#   gate.sh <trivy-report.json> <lock> [<rootfs-file-listing>]
+#   gate.sh <scan.json> <lock> [<rootfs-file-listing>]
 #
 # The report must come from `trivy image --format json --list-all-pkgs`.
 # The optional listing is `tar -t` output of the exported image filesystem.
