@@ -161,7 +161,9 @@ done
 # postinst-generated /etc/ca-certificates.conf does not exist in the .deb.
 mkdir -p "$root/etc/ssl/certs"
 bundle="$root/etc/ssl/certs/ca-certificates.crt"
-bash "$in_dir/select-ca-certificates.sh"     "$stage/pkg/ca-certificates/usr/share/ca-certificates"     "$in_dir/certificates.exclude" "$bundle"
+bash "$in_dir/select-ca-certificates.sh" \
+    "$stage/pkg/ca-certificates/usr/share/ca-certificates" \
+    "$in_dir/certificates.exclude" "$bundle"
 cert_count=$(grep -c 'BEGIN CERTIFICATE' "$bundle")
 [ "$cert_count" -ge 100 ] || fail "the CA bundle holds only $cert_count certificates"
 chmod 0644 "$bundle"
