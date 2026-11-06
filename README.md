@@ -265,8 +265,12 @@ DEBS_FROM=/tmp/debs scripts/reproduce.sh /tmp/stable.lock /tmp/reproduce
 
 `scripts/fetch-debs.sh` takes each package from `DEBS_FROM` only when the file's
 SHA-256 equals the lock. A missing asset, or one with another SHA-256, falls back
-to the snapshot.debian.org URL in the lock, and that download must match the lock
-too. `/tmp/reproduce/a/debs/sources.txt` says where each file came from. The
+to the snapshot.debian.org URL in the lock. If snapshot.debian.org fails, the
+same version is fetched from the live Debian archive of its suite
+(deb.debian.org or security.debian.org). Every download must match the lock's
+SHA-256, so the source never changes what is built. The live archive keeps only
+current versions, so this fallback helps a current build and not an old one.
+`/tmp/reproduce/a/debs/sources.txt` says where each file came from. The
 weekly reproduce workflow builds from the release assets in the same way.
 
 For an older digest, take `inputs.lock` from its release and check out the

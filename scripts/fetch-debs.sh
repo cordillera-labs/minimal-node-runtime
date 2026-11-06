@@ -6,7 +6,10 @@
 # For each package, the first file whose SHA-256 equals the lock wins:
 #   1. a file in <assets-dir>, such as the .deb assets of the release that
 #      published the lock (gh release download <tag> --pattern '*.deb');
-#   2. the content-addressed snapshot.debian.org URL in the lock.
+#   2. the content-addressed snapshot.debian.org URL in the lock;
+#   3. if snapshot fails, the same version from the live Debian archive of the
+#      package's suite (scripts/archive_url.py). The live archive keeps only
+#      current versions, so this helps a current build, not an old one.
 # A file in <assets-dir> with another SHA-256 is ignored. A download with
 # another SHA-256 fails the run. <out-dir>/<package>.deb is the result, and
 # <out-dir>/sources.txt says where each file came from.
@@ -25,15 +28,24 @@ if [ -n "$assets" ] && [ -d "$assets" ]; then
     done < <(find "$assets" -maxdepth 1 -type f -name '*.deb' -print0)
 fi
 
-while IFS=$'\t' read -r package version sha256 url _asset; do
+while IFS=$'\t' read -r package version sha256 url _asset suite; do
     target="$out/$package.deb"
     if [ -n "${by_sha[$sha256]:-}" ]; then
         cp "${by_sha[$sha256]}" "$target"
         origin="release asset $(basename "${by_sha[$sha256]}")"
     else
-        curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$target.part" "$url"
+        if curl -fsSL --retry 3 --retry-all-errors --retry-delay 10 -o "$target.part" "$url"; then
+            origin=$url
+        elif live=$(python3 "$root/scripts/archive_url.py" "$package" "$version" "$suite") &&
+            curl -fsSL --retry 3 --retry-all-errors --retry-delay 10 -o "$target.part" "$live"; then
+            echo "fetch-debs: snapshot failed for $package, used the live archive" >&2
+            origin=$live
+        else
+            rm -f "$target.part"
+            echo "fetch-debs: $package $version is unavailable from snapshot and the live archive" >&2
+            exit 1
+        fi
         mv "$target.part" "$target"
-        origin=$url
     fi
     got=$(sha256sum "$target" | cut -d' ' -f1)
     if [ "$got" != "$sha256" ]; then
