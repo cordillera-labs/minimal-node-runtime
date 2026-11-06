@@ -45,7 +45,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # a build definition change and the next update run rebuilds.
 BUILD_DEFINITION_FILES = (
     "Dockerfile", "packages.list", "certificates.exclude",
-    "scripts/assemble-rootfs.sh", "scripts/select-ca-certificates.sh", "toolchain.env",
+    "scripts/assemble-rootfs.sh", "scripts/select-ca-certificates.sh",
+    "runtime/ca-distrust.cjs", "toolchain.env",
 )
 
 SHA256 = r"[0-9a-f]{64}"

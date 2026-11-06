@@ -125,6 +125,12 @@ fail the build. This file and the selector script enter the build-definition
 hash, so any change triggers a rebuild. The runtime contains only the resulting
 `/etc/ssl/certs/ca-certificates.crt`, not the source certificates or policy.
 
+**Live distrust.** A separate opt-in preload at
+`/nodejs/lib/ca-distrust.cjs` reads a read-only, externally managed policy
+to remove trusted roots for new TLS connections without an image rebuild.
+It is not a package updater, doesn't add CAs, and has no network access.
+See [live CA distrust](hot-ca-distrust.md) for activation and limitations.
+
 **Node.js trust semantics:** Node uses its **bundled** Mozilla roots by default,
 not this system bundle. The smoke test checks that
 `tls.getCACertificates('system')` returns the certificates in the bundle.

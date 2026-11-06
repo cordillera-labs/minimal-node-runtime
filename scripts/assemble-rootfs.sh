@@ -102,6 +102,8 @@ install -D -m 0755 "$stage/node/bin/node" "$root/nodejs/bin/node"
 install -D -m 0644 "$stage/node/LICENSE" "$root/nodejs/LICENSE"
 generated node nodejs/bin/node
 generated node nodejs/LICENSE
+install -D -m 0644 "$in_dir/ca-distrust.cjs" "$root/nodejs/lib/ca-distrust.cjs"
+generated node nodejs/lib/ca-distrust.cjs
 
 # ---- 4. the libraries: what node links, then every library of each package ---------
 libdir="$stage/all/usr/lib/x86_64-linux-gnu"
