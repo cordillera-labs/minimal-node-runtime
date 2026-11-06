@@ -489,4 +489,9 @@ jobs:
 
       - name: Remove the builders
         if: always()
-        run: docker buildx ls --format '{{.Name}}' | grep '^mnr-' | xargs -r -n1 docker buildx rm --force
+        # Cleanup never fails the job: the build scripts may already have
+        # removed a builder, and buildx ls can list a name more than once.
+        run: |
+          for name in $(docker buildx ls --format '{{.Name}}' | grep '^mnr-' | sort -u); do
+            docker buildx rm --force "$name" >/dev/null 2>&1 || true
+          done
