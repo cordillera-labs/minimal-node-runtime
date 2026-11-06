@@ -8,7 +8,7 @@ const tls = require('node:tls');
 const { X509Certificate, createHash } = require('node:crypto');
 
 const MAX_POLICY_BYTES = 65536;
-const DEFAULT_POLL_MS = 5000;
+const DEFAULT_POLL_MS = 60000;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 function fingerprint(pem) {
@@ -126,4 +126,4 @@ if (process.env.MNR_CA_DISTRUST_FILE) {
   }
 }
 
-module.exports = { fingerprint, parsePolicy, createController, start };
+module.exports = { DEFAULT_POLL_MS, fingerprint, parsePolicy, createController, start };

@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const tls = require('node:tls');
-const { fingerprint, parsePolicy, createController, start } = require('../runtime/ca-distrust.cjs');
+const { DEFAULT_POLL_MS, fingerprint, parsePolicy, createController, start } = require('../runtime/ca-distrust.cjs');
 
 const roots = tls.rootCertificates.slice(0, 3);
 const fp = roots.map(fingerprint);
@@ -19,6 +19,11 @@ function fixture(policy = empty()) {
   return { controller, get: () => current, set: p => { input = Buffer.from(JSON.stringify(p)); },
     raw: str => { input = Buffer.from(str); } };
 }
+
+
+test('the default live policy polling interval is one minute', () => {
+  assert.equal(DEFAULT_POLL_MS, 60000);
+});
 
 test('empty policy preserves the initial trust set', () => {
   const f = fixture();

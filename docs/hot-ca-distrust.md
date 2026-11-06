@@ -54,7 +54,7 @@ preload works with both supported Node 22 and Node 24 lines.
 
 1. The operator validates and atomically replaces the **read-only mounted**
    policy file, with a larger `generation` value.
-2. The preload reads the file every five seconds by default. Set
+2. The preload reads the file every 60 seconds by default. Set
    `MNR_CA_DISTRUST_POLL_MS` to an integer between 100 and 60000 if needed.
    No shell, package manager, background updater, or container privilege
    is required.
