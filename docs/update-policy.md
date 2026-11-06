@@ -332,3 +332,12 @@ monthly, with a 7-day cooldown, and never merges them. CI checks each pull
 request. Dependabot does not read `toolchain.env`; the toolchain job opens an
 issue when a pin is behind (see [Toolchain pins](#toolchain-pins)), and a person
 changes the pin in a pull request. The next update run rebuilds with it.
+
+CI also lints the workflows on every pull request (`scripts/workflow-lint.sh`):
+zizmor for security mistakes such as unpinned actions, template injection,
+broad token permissions and persisted credentials, and actionlint for workflow
+errors and shellcheck in `run:` scripts. Both run from images pinned by digest
+in that script, not in `toolchain.env`, because they are not part of the build.
+The toolchain job does not check them; a person updates them, after the same
+cooldown. A deliberate exception is an inline `# zizmor: ignore[<rule>]` comment
+that says why.
