@@ -59,6 +59,9 @@ does not stop another. For each line, these jobs run:
    `main`.
 5. **report**: opens, updates or closes the line's issues.
 
+Beside the lines, a **toolchain** job checks the pins in `toolchain.env`. See
+[Toolchain pins](#toolchain-pins).
+
 After every line, **keepalive** commits a heartbeat when `main` has been quiet.
 See [Keepalive](#keepalive).
 
@@ -257,7 +260,7 @@ no longer reports the finding. No VEX statement is generated.
 ## Issues the workflows open
 
 The workflows report through issues. One open issue exists per title, and the
-title names the line. An update
+title names the line or, for a toolchain pin, the tool. An update
 edits the issue body, which sends no notification.
 
 | Label | Opened when | Closed when |
@@ -265,9 +268,38 @@ edits the issue body, which sends no notification.
 | `update-failure` | a job of a line's update fails | a later run of that line completes without a failure |
 | `upstream-signature` | a Node.js signature or checksum does not verify | by a maintainer |
 | `unfixed-cve` | a HIGH or CRITICAL finding has no fixed version | the hourly scan of the published stable image no longer reports it |
+| `toolchain-update` | a tool pin has a stable upstream release past the cooldown | the pin reaches that release |
 | `candidate` | a breaking build is published to `<line>-candidate` | the candidate is promoted |
 | `breaking` | a breaking security fix is published to stable | by a maintainer |
 | `reproducibility` | the weekly rebuild gives another digest, or the registry does not serve it | a later weekly run succeeds |
+
+## Toolchain pins
+
+`toolchain.env` pins BuildKit, buildx, Trivy and cosign. Dependabot does not
+read that file, so the **toolchain** job of the hourly run (`scripts/toolchain.py`)
+compares each pin with the latest stable release of its tool on GitHub
+(`aquasecurity/trivy`, `moby/buildkit`, `docker/buildx`, `sigstore/cosign`).
+A draft, a prerelease and a tag that is not `vMAJOR.MINOR.PATCH` never count.
+
+A newer release is eligible when its GitHub release is `COOLDOWN_DAYS` old, the
+same cooldown as every other input. There is no security fast path, because a
+person reviews every change to the build definition. The cooldown also gives time
+to notice a compromised release: Trivy's own release pipeline was compromised
+earlier in 2026.
+
+For each tool with an eligible release, the job opens one `toolchain-update`
+issue, titled `Toolchain pin update available: <tool>`. It edits the issue body
+on later runs and closes the issue when the pin reaches the eligible release.
+The job never edits `toolchain.env` and publishes nothing. A person reviews the
+release notes and merges a pull request that changes the pin; for an image pin the
+tag and the digest change together. Change the BuildKit and buildx pins on their
+own, because they can change the image digest.
+
+When the GitHub lookup fails, or a pin cannot be read, the job reports a fault in
+the run summary and as an annotation, opens no issue and leaves the tool's issue
+as it was. A fault is not "no update". The job is independent of the lines, so a
+fault never delays or fails a publication. A key added to `toolchain.env` with no
+entry in `scripts/toolchain.py` is a fault, and a unit test fails on it.
 
 ## Keepalive
 
@@ -297,5 +329,6 @@ script applies the cooldown to those updates, so its result can differ.
 
 Every GitHub Action is pinned by commit SHA. Dependabot proposes Action updates
 monthly, with a 7-day cooldown, and never merges them. CI checks each pull
-request. The tool versions in `toolchain.env` are changed by hand, and the
-next update run rebuilds with them.
+request. Dependabot does not read `toolchain.env`; the toolchain job opens an
+issue when a pin is behind (see [Toolchain pins](#toolchain-pins)), and a person
+changes the pin in a pull request. The next update run rebuilds with it.
