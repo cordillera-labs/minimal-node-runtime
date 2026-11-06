@@ -5,8 +5,9 @@ what the checks do not cover.
 
 ## The gate chain
 
-`.github/workflows/publish.yml` runs these checks in order. A failure at any
-step publishes nothing. Nothing is pushed before step 13.
+`.github/workflows/publish.yml` runs these checks in order. A failure before
+step 13 publishes nothing, because nothing is pushed before step 13. A failure
+after it leaves a partial publication, which the next run completes.
 
 1. **The lock.** Every value matches a fixed pattern before it becomes a build
    argument or a URL. `SOURCE_DATE_EPOCH` must equal the value derived from the
@@ -73,11 +74,47 @@ step publishes nothing. Nothing is pushed before step 13.
     [sources-and-licences.md](sources-and-licences.md).
 13. **The push.** The image is pushed by digest, with no tag. The pushed digest
     must equal the tested digest, or nothing is signed or tagged.
-14. **Signature and attestations.** The workflow signs the digest, attaches the
-    scan, provenance and SBOM attestations, and then verifies all four as a
-    consumer would.
-15. **The tags.** The tags move. Each tag must then resolve to the tested
+14. **What is already published.** `scripts/publication.py` reads the release
+    and the immutable tag of this build, and `scripts/verify-published.sh`
+    checks the signature and the three attestations of the digest. A release
+    or an immutable tag that records another digest fails the run. See
+    [Resuming a partial publish](#resuming-a-partial-publish).
+15. **Signature and attestations.** The workflow signs the digest and attaches
+    the scan, provenance and SBOM attestations, except each one that already
+    verifies. It then verifies all four as a consumer would.
+16. **The tags.** The tags move. Each tag must then resolve to the tested
     digest.
+17. **The release.** The workflow creates the GitHub release with its assets,
+    unless step 14 found the release of this digest.
+
+## Resuming a partial publish
+
+A run can publish and then fail before the `record` job commits `state/`.
+`state/` then names no publication, so the next run builds the same inputs to
+the same digest. Steps 14 to 17 make that run complete the publication:
+
+- The push of an existing digest sends the same bytes and changes nothing.
+- A signature or attestation that verifies as a consumer would is kept. The
+  run creates only the ones that do not verify, so a consumer never sees a
+  duplicate scan, provenance or SBOM attestation from the recovery.
+- The immutable tag is kept when it names the tested digest. The moving tags
+  are set to the digest again, which changes nothing when they already name
+  it.
+- The release is kept when its notes and its SBOM record the tested digest,
+  its `inputs.lock` has the same inputs, its source package record matches
+  this build, and it holds every asset. The run creates no release and
+  uploads no asset. The lock records the commit and the run that created the
+  release.
+
+Reuse depends on the digest only. A release that records another digest, a
+draft release, a release on the other channel, an incomplete release, or an
+immutable tag that names another digest fails the run before anything is
+signed, tagged or released. An unreadable tag fails the run too: only an
+HTTP 404 counts as absent, so a tag is never overwritten. A maintainer
+resolves such a fault by hand.
+
+The check runs after the push, so a fault can leave an untagged, unsigned
+digest in the registry. The digest passed every gate.
 
 ## Debian archive signatures
 
@@ -121,7 +158,7 @@ build input, so it changes no image digest.
 | smoke test | yes | yes | yes |
 | negative controls | yes | yes | no |
 | SBOM check | yes | yes | no |
-| signature and attestations | creates and verifies | no | verifies |
+| signature and attestations | creates what does not verify, then verifies | no | verifies |
 
 CI builds the stable lock with the pull request's build definition, and
 publishes nothing.

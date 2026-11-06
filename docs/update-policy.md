@@ -47,6 +47,14 @@ schedule, not a guarantee. Each run has these jobs:
 The update and promote workflows share one concurrency group, so they never run
 at the same time.
 
+A run that publishes and then fails before **record** leaves `state/` without
+the publication. The next run builds the same inputs to the same digest, finds
+the signature, the attestations, the tags and the release of that digest, and
+creates only what is missing. **record** then commits the lock with the commit
+and run that created the release. An existing release or tag that records
+another digest fails the run. See
+[gates.md](gates.md#resuming-a-partial-publish).
+
 Most runs find no eligible change and publish nothing. When upstream cannot be
 reached, the run builds nothing and the next run tries again. That case opens no
 issue; the run summary records the fault.
