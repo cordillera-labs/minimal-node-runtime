@@ -10,8 +10,13 @@ binary-to-source mapping comes from Debian, not from this repository.
 
 A source package already in <sources.json> is not downloaded again: a later
 release links the release that carries it. A new one is downloaded from
-snapshot.debian.org. Each file must match the SHA-256 in the Sources index of
-the same snapshot, and each file the .dsc lists must also match the .dsc.
+snapshot.debian.org. When snapshot.debian.org fails, the indexes and the files
+come from the live Debian archive of the suite instead, which keeps only
+current versions. Each index read here must match the signed Release file of
+its suite in the same archive (scripts/debian_archive.py). Each file must
+match the SHA-256 in that Sources index, and each file the .dsc lists must also
+match the .dsc. A mismatch is a fault, and never a reason to try the other
+archive.
 
 Writes:
   <dir>/files/       the new files, under GitHub-safe asset names
@@ -19,7 +24,9 @@ Writes:
                      sha256, asset name and Debian file name of each new file
   <dir>/sources.json the full set for this build: known entries keep their
                      release, new entries carry "release": null until the
-                     publish step names the release that carries them
+                     publish step names the release that carries them, and
+                     "downloaded_from", the archive whose Sources index
+                     listed the files
 """
 
 import argparse
@@ -33,14 +40,17 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import debian_archive  # noqa: E402
 import lock as lockfile  # noqa: E402
 import upstream  # noqa: E402
 
 SOURCES_INDEX = "main/source/Sources.xz"
 # snapshot.debian.org answers 503 and 504 for minutes at a time, so a source
-# download retries for longer than the shared request helper does.
+# download retries for longer than the shared request helper does. After one
+# request has failed every round, the rest of the run reads the live archive.
 FETCH_ROUNDS = 6
 FETCH_BACKOFF_SECONDS = 30
+SNAPSHOT_FAILED = "snapshot failed"  # the cache key that records it
 
 
 class SourceFault(Exception):
@@ -48,14 +58,45 @@ class SourceFault(Exception):
 
 
 def fetch(url):
+    """The body, or None on HTTP 404, which is an answer and is not retried."""
     for round_number in range(FETCH_ROUNDS):
         try:
-            return upstream.get(url)
+            return upstream.get_or_none(url)
         except ConnectionError:
             if round_number == FETCH_ROUNDS - 1:
                 raise
             time.sleep(FETCH_BACKOFF_SECONDS * (round_number + 1))
     raise ConnectionError(url)
+
+
+def bases(archive, stamp, suite, cache):
+    """The archives to read, in order: the snapshot at `stamp`, then the live
+    archive of the suite. Only the live archive once snapshot has failed."""
+    live = debian_archive.live_base(suite)
+    if cache.get(SNAPSHOT_FAILED):
+        return [live]
+    return [debian_archive.snapshot_base(archive, stamp), live]
+
+
+def snapshot_failed(error, cache):
+    print(f"sources: {error}; using the live archive", file=sys.stderr)
+    cache[SNAPSHOT_FAILED] = True
+
+
+def pool_file(pools, path, cache):
+    """A pool file from the first pool that serves it. A ConnectionError on
+    any but the last pool marks snapshot as failed and moves on."""
+    for number, base in enumerate(pools):
+        try:
+            body = fetch(f"{base}/{path}")
+        except ConnectionError as error:
+            if number == len(pools) - 1:
+                raise
+            snapshot_failed(error, cache)
+            continue
+        if body is not None:
+            return body
+    raise SourceFault(f"{path} is not served by {' or '.join(pools)}")
 
 
 def reuse(path, sha256, size):
@@ -81,12 +122,34 @@ def archive_of(suite):
     raise SourceFault(f"unknown suite {suite}")
 
 
-def index(archive, stamp, suite, path, cache):
-    key = (archive, stamp, suite, path)
+def release(base, suite, cache):
+    """The verified Release of a suite, read once per run."""
+    key = (base, suite)
     if key not in cache:
-        url = f"{upstream.SNAPSHOT}/archive/{archive}/{stamp}/dists/{suite}/{path}"
-        cache[key] = lzma.decompress(fetch(url)).decode()
+        cache[key] = debian_archive.verified_release(fetch, base, suite)
+        if cache[key] is None:
+            raise SourceFault(f"{base}/dists/{suite} has no Release file")
     return cache[key]
+
+
+def index(archive, stamp, suite, path, cache):
+    """(text, base): an index of the snapshot at `stamp`, or of the live archive
+    when snapshot fails, checked against the signed Release of the same
+    archive. A verification fault is raised and never falls back."""
+    candidates = bases(archive, stamp, suite, cache)
+    for number, base in enumerate(candidates):
+        key = (base, suite, path)
+        if key not in cache:
+            try:
+                body = debian_archive.index_file(fetch, release(base, suite, cache), path)
+            except ConnectionError as error:
+                if number == len(candidates) - 1:
+                    raise
+                snapshot_failed(error, cache)
+                continue
+            cache[key] = lzma.decompress(body).decode()
+        return cache[key], base
+    raise SourceFault(f"no archive answers for {suite} {path}")
 
 
 def parse_stanzas(text, wanted):
@@ -135,7 +198,8 @@ def asset_name(name):
 
 def source_of(package, version, archive, suite, stamps, cache):
     for stamp in stamps:
-        for fields in parse_stanzas(index(archive, stamp, suite, upstream.INDEX, cache), {package}):
+        text, _base = index(archive, stamp, suite, upstream.INDEX, cache)
+        for fields in parse_stanzas(text, {package}):
             if fields.get("Version") != version:
                 continue
             source = fields.get("Source", package)
@@ -143,26 +207,33 @@ def source_of(package, version, archive, suite, stamps, cache):
             if not match:
                 raise SourceFault(f"{package}: cannot read Source field {source!r}")
             return match.group(1), match.group(2) or version, stamp
-    raise SourceFault(f"{package} {version} is not listed in {suite} at {', '.join(stamps)}")
+    where = "the live archive" if cache.get(SNAPSHOT_FAILED) else ", ".join(stamps)
+    raise SourceFault(f"{package} {version} is not listed in {suite} at {where}")
 
 
 def download(archive, stamp, suite, source, version, out_dir, cache):
-    stanzas = [fields for fields in parse_stanzas(index(archive, stamp, suite, SOURCES_INDEX, cache), {source})
-               if fields.get("Version") == version]
+    """(files, base): the verified files of one source package, and the
+    archive whose Sources index listed them."""
+    text, index_base = index(archive, stamp, suite, SOURCES_INDEX, cache)
+    stanzas = [fields for fields in parse_stanzas(text, {source}) if fields.get("Version") == version]
     if not stanzas:
-        raise SourceFault(f"source {source} {version} is not in the {suite} Sources index at {stamp}")
+        raise SourceFault(f"source {source} {version} is not in the {suite} Sources index at {index_base}")
     fields = stanzas[0]
     listed = checksums(fields.get("Checksums-Sha256", ""))
     dsc_names = [name for name in listed if name.endswith(".dsc")]
     if len(dsc_names) != 1:
         raise SourceFault(f"source {source} {version} lists {len(dsc_names)} .dsc files")
-    base = f"{upstream.SNAPSHOT}/archive/{archive}/{stamp}/{fields['Directory']}"
     files = []
     contents = {}
     for name, (sha256, size) in sorted(listed.items()):
-        body = reuse(os.path.join(out_dir, asset_name(name)), sha256, size) or fetch(f"{base}/{name}")
-        if hashlib.sha256(body).hexdigest() != sha256 or len(body) != size:
-            raise SourceFault(f"{name} does not match the Sources index of {suite} at {stamp}")
+        body = reuse(os.path.join(out_dir, asset_name(name)), sha256, size)
+        if body is None:
+            # The pool of the archive whose index listed the file, then the
+            # live pool. The SHA-256 of the index decides either way.
+            live = debian_archive.live_base(suite)
+            pools = [live] if index_base == live or cache.get(SNAPSHOT_FAILED) else [index_base, live]
+            body = pool_file(pools, f"{fields['Directory']}/{name}", cache)
+        debian_archive.check_file(body, sha256, size, f"{name} from the Sources index at {index_base}")
         contents[name] = body
     in_dsc = checksums(dsc_fields(contents[dsc_names[0]].decode()).get("Checksums-Sha256", ""))
     if not in_dsc:
@@ -178,7 +249,7 @@ def download(archive, stamp, suite, source, version, out_dir, cache):
             handle.write(body)
         files.append({"name": name, "asset": asset_name(name),
                       "sha256": hashlib.sha256(body).hexdigest(), "size": len(body)})
-    return files
+    return files, index_base
 
 
 def collect(lock, known, out):
@@ -204,10 +275,11 @@ def collect(lock, known, out):
         if key in known:
             result[key] = dict(known[key], binaries=entry["binaries"])
             continue
-        files = download(entry["archive"], entry["stamp"], entry["suite"], entry["source"], entry["version"],
-                         os.path.join(out, "files"), cache)
+        files, index_base = download(entry["archive"], entry["stamp"], entry["suite"], entry["source"],
+                                     entry["version"], os.path.join(out, "files"), cache)
         result[key] = {"source": entry["source"], "version": entry["version"], "binaries": entry["binaries"],
-                       "snapshot": f"{upstream.SNAPSHOT}/archive/{entry['archive']}/{entry['stamp']}/",
+                       "snapshot": f"{debian_archive.snapshot_base(entry['archive'], entry['stamp'])}/",
+                       "downloaded_from": f"{index_base}/",
                        "files": files, "release": None, "release_url": None}
         lines += [f"{item['sha256']}  {item['asset']}  {item['name']}" for item in files]
     os.makedirs(out, exist_ok=True)
@@ -255,7 +327,7 @@ def main(argv):
                 sources = json.load(handle)
             json.dump(record(sources, args.tag, args.url), sys.stdout, indent=2, sort_keys=True)
             sys.stdout.write("\n")
-    except (SourceFault, lockfile.LockError, ConnectionError, lzma.LZMAError) as fault:
+    except (SourceFault, debian_archive.ArchiveFault, lockfile.LockError, ConnectionError, lzma.LZMAError) as fault:
         print(f"sources.py: {fault}", file=sys.stderr)
         return 1
     return 0

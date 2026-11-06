@@ -16,7 +16,9 @@ Sources:
               On a change, the image config "created" time is read as its
               release date.
   Debian      the Packages indexes of trixie, trixie-updates (deb.debian.org)
-              and trixie-security (deb.debian.org/debian-security). On a
+              and trixie-security (deb.debian.org/debian-security), each
+              checked against its suite's signed Release file
+              (scripts/debian_archive.py). On a
               version change, snapshot.debian.org supplies the
               content-addressed download URL and the cooldown evidence: whether
               the version was already listed in its suite in the snapshot taken
@@ -39,19 +41,15 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import debian_archive  # noqa: E402
 import lock as lockfile  # noqa: E402
 
 REPO_ROOT = lockfile.REPO_ROOT
 USER_AGENT = "minimal-node-runtime-update-check"
 TIMEOUT = 60
 
-DEBIAN_SUITES = (
-    # (archive, suite, live mirror)
-    ("debian", "trixie", "https://deb.debian.org/debian"),
-    ("debian", "trixie-updates", "https://deb.debian.org/debian"),
-    ("debian-security", "trixie-security", "https://deb.debian.org/debian-security"),
-)
-SNAPSHOT = "https://snapshot.debian.org"
+DEBIAN_SUITES = debian_archive.SUITES  # (archive, suite, live mirror)
+SNAPSHOT = debian_archive.SNAPSHOT
 INDEX = "main/binary-amd64/Packages.xz"
 
 
@@ -88,6 +86,16 @@ def request(url, method="GET", headers=None, follow=True, attempts=4):
 
 def get(url, headers=None):
     status, _, body = request(url, headers=headers)
+    if status != 200:
+        raise ConnectionError(f"GET {url}: HTTP {status}")
+    return body
+
+
+def get_or_none(url):
+    """The body, or None on HTTP 404: the `fetch` that debian_archive takes."""
+    status, _, body = request(url)
+    if status == 404:
+        return None
     if status != 200:
         raise ConnectionError(f"GET {url}: HTTP {status}")
     return body
@@ -241,11 +249,21 @@ def dpkg_compare(left, operator, right):
     return subprocess.run(["dpkg", "--compare-versions", left, operator, right], check=False).returncode == 0
 
 
+def verified_index(base, suite, path=INDEX):
+    """The decompressed text of an index file, checked against the signed
+    Release of its suite. A suite with no Release file is a fault."""
+    release = debian_archive.verified_release(get_or_none, base, suite)
+    if release is None:
+        raise UpstreamFault(f"{base}/dists/{suite} has no Release file")
+    return lzma.decompress(debian_archive.index_file(get_or_none, release, path)).decode()
+
+
 def debian_current(packages):
-    """The newest version of each package across the three suites."""
+    """The newest version of each package across the three suites, from
+    indexes that verify against the signed Release files."""
     best = {}
     for archive, suite, mirror in DEBIAN_SUITES:
-        text = lzma.decompress(get(f"{mirror}/dists/{suite}/{INDEX}")).decode()
+        text = verified_index(mirror, suite)
         for name, stanzas in parse_packages(text, set(packages)).items():
             for fields in stanzas:
                 candidate = {
@@ -285,21 +303,6 @@ def snapshot_url(entry, now):
     return None
 
 
-def release_index_hash(release_text):
-    in_sha256 = False
-    for line in release_text.splitlines():
-        if line.startswith("SHA256:"):
-            in_sha256 = True
-            continue
-        if in_sha256:
-            if not line.startswith(" "):
-                break
-            parts = line.split()
-            if len(parts) == 3 and parts[2] == INDEX:
-                return parts[0]
-    return None
-
-
 # Snapshot probes sit on a fixed grid of whole 6-hour steps from the Unix epoch,
 # so the date found does not depend on the time the search runs.
 GRID = datetime.timedelta(hours=6)
@@ -312,7 +315,9 @@ def grid_point(index):
 
 def listed_at(entry, name, stamp, cache):
     """Whether the version was listed in its suite in the snapshot at `stamp`.
-    True or False, or None when snapshot.debian.org cannot answer."""
+    True or False, or None when snapshot.debian.org cannot answer. Both
+    Release files compared here, and the index read, are verified; a fault in
+    that check raises."""
     archive, suite = entry["archive"], entry["suite"]
     key = (archive, suite, stamp)
     try:
@@ -320,17 +325,15 @@ def listed_at(entry, name, stamp, cache):
             mirror = {(a, s): m for a, s, m in DEBIAN_SUITES}[(archive, suite)]
             live_key = (archive, suite, "live")
             if live_key not in cache:
-                cache[live_key] = release_index_hash(get(f"{mirror}/dists/{suite}/Release").decode())
-            then_url = f"{SNAPSHOT}/archive/{archive}/{stamp}/dists/{suite}"
-            status, _, release = request(f"{then_url}/Release")
-            if status == 404:
+                live = debian_archive.verified_release(get_or_none, mirror, suite)
+                cache[live_key] = live.files.get(INDEX, ("",))[0] if live else ""
+            release = debian_archive.verified_release(get_or_none, debian_archive.snapshot_base(archive, stamp), suite)
+            if release is None:
                 cache[key] = ""  # the suite did not exist yet
-            elif status != 200:
-                raise ConnectionError(f"{then_url}/Release: HTTP {status}")
-            elif cache[live_key] and release_index_hash(release.decode()) == cache[live_key]:
+            elif cache[live_key] and release.files.get(INDEX, ("",))[0] == cache[live_key]:
                 cache[key] = None  # the same index as today, so it lists every live version
             else:
-                cache[key] = lzma.decompress(get(f"{then_url}/{INDEX}")).decode()
+                cache[key] = lzma.decompress(debian_archive.index_file(get_or_none, release, INDEX)).decode()
         text = cache[key]
     except (ConnectionError, lzma.LZMAError):
         return None
@@ -433,7 +436,7 @@ def main(argv):
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
     try:
         result = resolve(base, now)
-    except UpstreamFault as fault:
+    except (UpstreamFault, debian_archive.ArchiveFault) as fault:
         result = {"resolved_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                   "faults": [{"kind": "upstream", "input": "debian", "message": str(fault)}]}
     except ConnectionError as error:

@@ -6,7 +6,9 @@ They need `dpkg` for version comparison, as the workflows do.
 
 import datetime
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
@@ -386,6 +388,18 @@ class LockFile(unittest.TestCase):
     def test_package_keys(self):
         self.assertEqual(lockfile.package_key("libstdc++6"), "LIBSTDCXX6")
         self.assertEqual(lockfile.package_key("gcc-14-base"), "GCC_14_BASE")
+
+    def test_a_toolchain_change_changes_the_build_definition(self):
+        self.assertIn("toolchain.env", lockfile.BUILD_DEFINITION_FILES)
+        with tempfile.TemporaryDirectory() as root:
+            for name in lockfile.BUILD_DEFINITION_FILES:
+                os.makedirs(os.path.join(root, os.path.dirname(name)), exist_ok=True)
+                shutil.copy(os.path.join(lockfile.REPO_ROOT, name), os.path.join(root, name))
+            before = lockfile.build_definition_hash(root)
+            self.assertEqual(before, lockfile.build_definition_hash())
+            with open(os.path.join(root, "toolchain.env"), "a", encoding="utf-8") as handle:
+                handle.write("BUILDX_VERSION=v0.0.0\n")
+            self.assertNotEqual(lockfile.build_definition_hash(root), before)
 
     def test_the_committed_stable_lock_is_valid(self):
         path = os.path.join(lockfile.REPO_ROOT, "state", "stable.lock")

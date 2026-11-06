@@ -439,7 +439,7 @@ jobs:
             "$work/scan.json" "$DIGEST" "$TAG" "$CHANNEL" "$work/sources-final.json" > "$work/notes.md"
           # The six .deb files the image was built from, under GitHub-safe names.
           mkdir -p "$work/assets"
-          while IFS=$'\t' read -r package _version _sha256 _url asset; do
+          while IFS=$'\t' read -r package _version _sha256 _url asset _suite; do
             cp "$work/out/a/debs/$package.deb" "$work/assets/$asset"
           done < <(python3 scripts/lock.py debs "$work/build.lock")
           if [ -d "$work/sources/files" ]; then

@@ -18,7 +18,7 @@ Usage:
   lock.py get <lock> <KEY>             print one value
   lock.py inputs-hash <lock>           print the hash of the input keys
   lock.py tag <lock>                   print the immutable image tag
-  lock.py debs <lock>                  print package, version, sha256, url, asset name
+  lock.py debs <lock>                  print package, version, sha256, url, asset name, suite
   lock.py set <lock> KEY=VALUE...      set keys and rewrite the file
   lock.py build-definition             print the hash of the build definition
 """
@@ -32,7 +32,9 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The files whose content defines the image, apart from the lock inputs.
-BUILD_DEFINITION_FILES = ("Dockerfile", "packages.list", "scripts/assemble-rootfs.sh")
+# toolchain.env pins BuildKit, which fixes the layer bytes, so a tool bump is
+# a build definition change and the next update run rebuilds.
+BUILD_DEFINITION_FILES = ("Dockerfile", "packages.list", "scripts/assemble-rootfs.sh", "toolchain.env")
 
 SHA256 = r"[0-9a-f]{64}"
 DEBIAN_VERSION = r"[0-9][0-9A-Za-z.+~:-]{0,99}"
@@ -260,13 +262,13 @@ def asset_name(package, version):
 
 
 def debs(lock, packages):
-    """One (package, version, sha256, url, asset name) per pinned package."""
+    """One (package, version, sha256, url, asset name, suite) per pinned package."""
     require_complete(lock, packages)
     rows = []
     for package in packages:
         prefix = f"DEB_{package_key(package)}_"
         rows.append((package, lock[prefix + "VERSION"], lock[prefix + "SHA256"], lock[prefix + "URL"],
-                     asset_name(package, lock[prefix + "VERSION"])))
+                     asset_name(package, lock[prefix + "VERSION"]), lock[prefix + "SUITE"]))
     return rows
 
 

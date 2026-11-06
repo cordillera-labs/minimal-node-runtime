@@ -1,0 +1,18 @@
+# Primary key fingerprints of the Debian archive signing keys for Debian 13
+# (trixie). A Release or InRelease file is accepted only when gpgv finds a valid
+# signature from one of these keys. scripts/debian_archive.py reads this file.
+#
+# debian-archive-keys.asc holds the public keys, in this order. They are the
+# files from https://ftp-master.debian.org/keys.html:
+#   keys/archive-key-13.asc, keys/archive-key-13-security.asc, keys/release-13.asc
+# Each file is byte-identical to its copy in debian-archive-keyring 2025.1
+# (/etc/apt/trusted.gpg.d/debian-archive-trixie-*.asc), and each fingerprint
+# below equals the one that ftp-master.debian.org/keys.html publishes.
+#
+# trixie and trixie-updates are signed by the archive key and, for trixie, the
+# stable release key. trixie-security is signed by the security archive key.
+# Debian co-signs with the keys of other releases, which are not listed here.
+# A new key needs a reviewed change to both files. See docs/update-policy.md.
+04B54C3CDCA79751B16BC6B5225629DF75B188BD Debian Archive Automatic Signing Key (13/trixie)
+5E04A1E3223A19A20706E20F9904613D4CCE68C6 Debian Security Archive Automatic Signing Key (13/trixie)
+41587F7DB8C774BCCF131416762F67A0B2C39DE4 Debian Stable Release Key (13/trixie)
