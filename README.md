@@ -34,6 +34,13 @@ Not in the image: a shell, `apt`, `dpkg`, `npm`, `corepack`, `tzdata` and the
 system zlib (`zlib1g`). Node.js carries its own copies of zlib, OpenSSL, ICU and
 other libraries inside the binary.
 
+The CA bundle is generated deterministically from the pinned Debian roots.
+`certificates.exclude` can remove individual package roots, with invalid
+entries failing the build. Node itself uses bundled Mozilla roots by default;
+to enforce exclusions for Node TLS clients, use
+`NODE_OPTIONS=--use-openssl-ca` to select the image's `SSL_CERT_FILE` store.
+See [certificate selection](docs/contents.md#runtime-configuration).
+
 Full inventory: [docs/contents.md](docs/contents.md).
 
 ## Use it

@@ -48,6 +48,8 @@ RUN set -eu; cd /in/debs; \
 
 COPY packages.list /in/packages.list
 COPY scripts/assemble-rootfs.sh /in/assemble-rootfs.sh
+COPY scripts/select-ca-certificates.sh /in/select-ca-certificates.sh
+COPY certificates.exclude /in/certificates.exclude
 RUN NODE_VERSION="${NODE_VERSION}" SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
     bash /in/assemble-rootfs.sh /in /rootfs /out
 

@@ -14,7 +14,7 @@ image, with the package that owns it and its type. The build writes the same fil
 | `/usr/lib/x86_64-linux-gnu/` | 22 shared libraries: the 20 of `libc6` (see below), `libstdc++.so.6` and `libgcc_s.so.1` | Debian packages `libc6`, `libstdc++6`, `libgcc-s1` |
 | `/usr/lib64/ld-linux-x86-64.so.2` | a link to the loader, the interpreter path that `node` names | `libc6` |
 | `/bin`, `/lib`, `/lib64` | links to `usr/bin`, `usr/lib`, `usr/lib64` (merged-usr layout) | generated |
-| `/etc/ssl/certs/ca-certificates.crt` | the Mozilla CA bundle | built from the certificates in `ca-certificates` |
+| `/etc/ssl/certs/ca-certificates.crt` | the selected Mozilla CA bundle | built from the pinned `ca-certificates` package, minus entries in `certificates.exclude` |
 | `/etc/debian_version`, `/etc/os-release` | the OS identity that scanners read | `base-files` |
 | `/usr/share/doc/<package>/copyright` | the copyright file of each shipped package | each package |
 | `/usr/share/common-licenses/` | the licence texts that the copyright files refer to | `base-files` |
@@ -113,10 +113,27 @@ zone data. `Intl` resolves any IANA zone, and `TZ` sets the local zone. The smok
 test checks both with `TZ=America/Vancouver`, and checks that ICU is the full
 build.
 
-**Certificates.** Node.js trusts its own built-in Mozilla root store by default.
-The CA bundle is the system store that Node.js reads: the smoke test checks that
-`tls.getCACertificates('system')` returns exactly the certificates in the
-bundle. To trust the system store, start `node` with `--use-system-ca`.
+**Certificates.** Debian normally creates `/etc/ca-certificates.conf` in the
+`ca-certificates` package's post-installation script. This image extracts the
+pinned `.deb` without running installation scripts, so that configuration does
+not exist. The build instead selects all roots packaged under
+`/usr/share/ca-certificates` by default, matching a fresh Debian install.
+To exclude one, add its exact package-relative `.crt` path (for example
+`mozilla/Example_Root_CA.crt`) to the reviewed `certificates.exclude` file.
+Blank lines and comments are ignored. Invalid, duplicate, or missing paths
+fail the build. This file and the selector script enter the build-definition
+hash, so any change triggers a rebuild. The runtime contains only the resulting
+`/etc/ssl/certs/ca-certificates.crt`, not the source certificates or policy.
+
+**Node.js trust semantics:** Node uses its **bundled** Mozilla roots by default,
+not this system bundle. The smoke test checks that
+`tls.getCACertificates('system')` returns the certificates in the bundle.
+To **enforce an exclusion** for Node's default HTTPS/fetch clients, start
+Node with `--use-openssl-ca` (for example `NODE_OPTIONS=--use-openssl-ca`);
+it uses `SSL_CERT_FILE` pointing to this bundle. `--use-system-ca` instead
+**adds** the system store to Node's built-in roots and is not sufficient to
+distrust a certificate that remains bundled. No Node default trust behavior
+changes in this patch.
 
 ## What a scanner sees
 
