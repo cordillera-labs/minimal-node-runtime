@@ -2,9 +2,9 @@
 # The hourly update workflow writes this file after a successful publish.
 # Edit it by hand only to roll back, and expect the next run to re-evaluate it.
 CHANNEL=stable
-EVALUATED_AT=2026-11-06T02:30:28Z
-BUILD_DEFINITION_SHA256=6978c32cbaa0bd9fd14aecab9215125413831d880909ce2a10482f6c10cb7041
-BUILD_DEFINITION_ACCEPTED=initial
+EVALUATED_AT=2026-11-06T09:13:03Z
+BUILD_DEFINITION_SHA256=a7a682cf0bb2de5d3763b2115de857a523126fdda3f565e1e0554be9307abf8a
+BUILD_DEFINITION_ACCEPTED=repository change
 SOURCE_DATE_EPOCH=1792540800
 HELPER_IMAGE=docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 HELPER_IMAGE_RELEASED=2026-11-04T21:23:39Z
@@ -49,3 +49,9 @@ DEB_LIBSTDCXX6_URL=https://snapshot.debian.org/file/88eff3277c2e74be3878264096b9
 DEB_LIBSTDCXX6_SHA256=ab1fa05837aa7a92aae748fd07a18a35f7d18bb4a71c4724fe2bbf0e32089de0
 DEB_LIBSTDCXX6_RELEASED=2026-07-09T00:00:00Z
 DEB_LIBSTDCXX6_ACCEPTED=initial
+BREAKING_PACKAGES=
+PUBLISHED_DIGEST=sha256:70b2ae2d006d1cfc94de7705f2c335be3cbb1f8e1c625702c624249b6c3ac8ff
+PUBLISHED_TAG=22.23.4-trixie-2824bdb231d8
+PUBLISHED_COMMIT=ffce8f1cd893ae8c5b34a17d8694b887d313a220
+PUBLISHED_RELEASE=https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/22.23.4-trixie-2824bdb231d8
+PUBLISHED_RUN=https://github.com/cordillera-labs/minimal-node-runtime/actions/runs/42188163064
