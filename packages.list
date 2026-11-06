@@ -1,7 +1,9 @@
 # Debian packages whose files ship in the image, one per line, with the reason.
 # The image carries a dpkg status entry for exactly this set, so a scanner sees
-# every package whose files ship. Adding or removing a line is a breaking change:
-# the next build publishes to the 22-candidate channel only.
+# every package whose files ship. Every Node.js line ships this same set, and the
+# build fails if a line's node links anything else. Adding or removing an entry
+# is a breaking change: each line's next build publishes to its <line>-candidate
+# channel only.
 base-files       # /etc/debian_version and /etc/os-release, which scanners use to detect the OS; the common licence texts
 ca-certificates  # the Mozilla CA bundle at /etc/ssl/certs/ca-certificates.crt
 gcc-14-base      # the copyright file that libgcc-s1 and libstdc++6 point their /usr/share/doc entries to

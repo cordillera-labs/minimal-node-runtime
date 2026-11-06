@@ -14,14 +14,15 @@ to read its scan result and SBOM.
 A tag moves. Verify and pin a digest. To read the digest a tag points at now:
 
 ```sh
-docker buildx imagetools inspect ghcr.io/cordillera-labs/minimal-node-runtime:22 \
+docker buildx imagetools inspect ghcr.io/cordillera-labs/minimal-node-runtime:24 \
   --format '{{json .Manifest}}' | jq -r .digest
 ```
 
-The lock on `main` records the current stable digest. It must match:
+The lock on `main` records each line's current stable digest. For the `24` tag
+it must match:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cordillera-labs/minimal-node-runtime/main/state/stable.lock \
+curl -fsSL https://raw.githubusercontent.com/cordillera-labs/minimal-node-runtime/main/state/24/stable.lock \
   | grep '^PUBLISHED_DIGEST='
 ```
 

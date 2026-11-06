@@ -1,5 +1,5 @@
-# Builds one lock, runs every gate, and publishes the digest with its
-# signature, SBOM, scan and provenance. Called by update.yml only.
+# Builds one lock of one line, runs every gate, and publishes the digest with
+# its signature, SBOM, scan and provenance. Called by line.yml only.
 #
 # Order: verify the Node.js signature, build twice in fresh builders (the
 # digests must match), gate, vulnerability policy, smoke test, negative
@@ -20,6 +20,10 @@ name: publish
 on:
   workflow_call:
     inputs:
+      line:
+        description: The Node.js major the lock belongs to; its state is in state/<line>/.
+        required: true
+        type: string
       lock_b64:
         description: The lock to build, base64-encoded.
         required: true
@@ -35,8 +39,9 @@ on:
         default: ''
       sources_b64:
         description: >-
-          The source packages already carried by a release (state/sources.json),
-          base64-encoded. Empty means state/sources.json at this commit.
+          The source packages already carried by a release of this line
+          (state/<line>/sources.json), base64-encoded. Empty means that file at
+          this commit.
         required: false
         type: string
         default: ''
@@ -61,7 +66,7 @@ on:
         description: A stable subset to build next, when the build went to the candidate channel.
         value: ${{ jobs.publish.outputs.split_lock_b64 }}
       sources_b64:
-        description: state/sources.json after this run, base64-encoded.
+        description: state/<line>/sources.json after this run, base64-encoded.
         value: ${{ jobs.publish.outputs.sources_b64 }}
       breaking:
         value: ${{ jobs.publish.outputs.breaking }}
@@ -99,6 +104,7 @@ jobs:
       unfixed_json: ${{ steps.policy.outputs.unfixed_json }}
       signature_fault: ${{ steps.node.outputs.signature_fault }}
     env:
+      LINE: ${{ inputs.line }}
       DOCKER_BUILD_SUMMARY: 'false'
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
     steps:
@@ -116,6 +122,10 @@ jobs:
           POLICY: ${{ inputs.policy }}
         run: |
           case "$POLICY" in auto | stable-only) ;; *) echo "invalid policy $POLICY"; exit 1 ;; esac
+          if ! [[ "$LINE" =~ ^[1-9][0-9]{0,2}$ ]] || [ ! -f "state/$LINE/stable.lock" ]; then
+            echo "invalid line $LINE"
+            exit 1
+          fi
           grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
           work="$RUNNER_TEMP/work"
           mkdir -p "$work"
@@ -123,13 +133,13 @@ jobs:
           printf '%s' "$UPSTREAM_B64" | base64 -d > "$work/upstream.json"
           if [ -n "$SOURCES_B64" ]; then
             printf '%s' "$SOURCES_B64" | base64 -d > "$work/known-sources.json"
-          elif [ -f state/sources.json ]; then
-            cp state/sources.json "$work/known-sources.json"
+          elif [ -f "state/$LINE/sources.json" ]; then
+            cp "state/$LINE/sources.json" "$work/known-sources.json"
           else
             echo '{}' > "$work/known-sources.json"
           fi
           jq -e 'type == "object"' "$work/known-sources.json" > /dev/null
-          python3 scripts/lock.py check "$work/build.lock"
+          python3 scripts/lock.py check "$work/build.lock" "$LINE"
           {
             echo "tag=$(python3 scripts/lock.py tag "$work/build.lock")"
             echo "node_version=$(python3 scripts/lock.py get "$work/build.lock" NODE_VERSION)"
@@ -257,8 +267,8 @@ jobs:
           DIGEST: ${{ steps.reproduce.outputs.digest }}
         run: |
           work="$RUNNER_TEMP/work"
-          python3 scripts/policy.py channel --lock "$work/build.lock" --stable state/stable.lock \
-            --stable-manifest state/stable.rootfs --manifest "$work/out/a/rootfs.manifest" \
+          python3 scripts/policy.py channel --lock "$work/build.lock" --stable "state/$LINE/stable.lock" \
+            --stable-manifest "state/$LINE/stable.rootfs" --manifest "$work/out/a/rootfs.manifest" \
             --policy "$POLICY" --out-dir "$work/decision"
           channel=$(jq -r .channel "$work/decision/decision.json")
           {
@@ -273,7 +283,7 @@ jobs:
             jq -r .message "$work/decision/decision.json"
             exit 1
           fi
-          published=$(python3 scripts/lock.py get "state/$channel.lock" PUBLISHED_DIGEST 2>/dev/null || true)
+          published=$(python3 scripts/lock.py get "state/$LINE/$channel.lock" PUBLISHED_DIGEST 2>/dev/null || true)
           if [ "$published" = "$DIGEST" ]; then
             echo "unchanged=true" >> "$GITHUB_OUTPUT"
           fi
@@ -456,8 +466,8 @@ jobs:
         # the digest it already names changes nothing.
         run: |
           case "$CHANNEL" in
-            stable) tags="$TAG 22 22-trixie" ;;
-            candidate) tags="$TAG 22-candidate" ;;
+            stable) tags="$TAG $LINE $LINE-trixie" ;;
+            candidate) tags="$TAG $LINE-candidate" ;;
           esac
           args=()
           for tag in $tags; do args+=(-t "$IMAGE_REPOSITORY:$tag"); done
@@ -500,7 +510,7 @@ jobs:
           # This release carries every source package no earlier release carries.
           python3 -I scripts/sources.py record --sources "$work/sources/sources.json" --tag "$TAG" --url "$url" \
             > "$work/sources-final.json"
-          scripts/release-notes.sh "$work/build.lock" "state/$CHANNEL.lock" "$work/decision/decision.json" \
+          scripts/release-notes.sh "$work/build.lock" "state/$LINE/$CHANNEL.lock" "$work/decision/decision.json" \
             "$work/scan.json" "$DIGEST" "$TAG" "$CHANNEL" "$work/sources-final.json" > "$work/notes.md"
           # The six .deb files the image was built from, under GitHub-safe names.
           mkdir -p "$work/assets"
@@ -542,7 +552,7 @@ jobs:
             # The same digest is already published; keep its record.
             cp "$work/known-sources.json" "$work/sources-final.json"
             for key in PUBLISHED_DIGEST PUBLISHED_TAG PUBLISHED_COMMIT PUBLISHED_RELEASE PUBLISHED_RUN; do
-              python3 scripts/lock.py set "$final" "$key=$(python3 scripts/lock.py get "state/$CHANNEL.lock" "$key")"
+              python3 scripts/lock.py set "$final" "$key=$(python3 scripts/lock.py get "state/$LINE/$CHANNEL.lock" "$key")"
             done
             echo "result=unchanged" >> "$GITHUB_OUTPUT"
           else

@@ -26,13 +26,14 @@ stable and candidate digests.
 ## Rebuild the current stable digest
 
 The lock on `main` names the commit that built the published digest. Check out
-that commit and build its lock:
+that commit and build its lock. Set `line` to the Node.js major, `22` or `24`:
 
 ```sh
 git clone https://github.com/cordillera-labs/minimal-node-runtime
 cd minimal-node-runtime
 work=$(mktemp -d)
-cp state/stable.lock "$work/stable.lock"
+line=24
+cp "state/$line/stable.lock" "$work/stable.lock"
 git checkout "$(python3 scripts/lock.py get "$work/stable.lock" PUBLISHED_COMMIT)"
 scripts/reproduce.sh "$work/stable.lock" "$work/out"
 ```
@@ -42,7 +43,7 @@ the two digests with each other, and with `PUBLISHED_DIGEST` in the lock. It als
 compares the two file lists. It exits non-zero on any difference, and prints
 `reproduce: pass` on success. The digest it built is in `$work/out/digest`.
 
-For the candidate channel, use `state/candidate.lock` in the same way. That file
+For the candidate channel, use `state/$line/candidate.lock` in the same way. That file
 exists only after a candidate has been published.
 
 ## Build from the release assets
@@ -65,7 +66,7 @@ Each release attaches its lock as `inputs.lock`, and its tag points at the
 commit that built it. In the same clone and shell as above:
 
 ```sh
-tag=22.<minor>.<patch>-trixie-<hash>
+tag=<major>.<minor>.<patch>-trixie-<hash>
 git checkout "$tag"
 gh release download "$tag" --repo cordillera-labs/minimal-node-runtime --pattern inputs.lock --dir "$work/old"
 gh release download "$tag" --repo cordillera-labs/minimal-node-runtime --pattern '*.deb' --dir "$work/old-debs"

@@ -1,9 +1,11 @@
 # check=skip=InvalidDefaultArgInFrom
-# A FROM scratch image that holds the Node.js 22 binary, the shared libraries
-# it links, a CA bundle and a nonroot user, and nothing else.
+# A FROM scratch image that holds one Node.js binary, the shared libraries it
+# links, a CA bundle and a nonroot user, and nothing else. Every line (Node.js
+# major) builds from this one file.
 #
-# Every input is pinned in state/*.lock and passed in as a build argument by
-# scripts/lock.py build-args. Build with scripts/build.sh, not by hand.
+# Every input is pinned in state/<line>/*.lock and passed in as a build
+# argument by scripts/lock.py build-args. Build with scripts/build.sh, not by
+# hand.
 #
 # No `# syntax=` line: the frontend is the one built into the pinned BuildKit,
 # so no extra image is pulled. The check directive above skips the warning

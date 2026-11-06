@@ -43,8 +43,8 @@ A release that is the first to ship a source package version attaches that
 source package as release assets: the `.dsc`, the `.orig` tarball and the
 `.debian` tarball, or the single tarball of a native package. A later release
 with the same source version does not attach it again. Its release notes link
-the release that carries it. `state/sources.json` on `main` records which
-release carries each source package.
+the release that carries it. Each line keeps its own record: `state/<line>/sources.json`
+on `main` names the release of that line that carries each source package.
 
 ### How they are collected
 

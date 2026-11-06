@@ -5,10 +5,10 @@
 #
 #   issue.sh ensure <label> <title> <body-file>
 #   issue.sh close <label> <title> <comment>
-#   issue.sh sync-unfixed <unfixed.json> <image-ref> <source>
-#       Ensures one "unfixed-cve" issue per HIGH or CRITICAL finding without a
-#       fix. With <source> "published-stable", it also closes the open
-#       unfixed-cve issues whose finding is gone from that scan.
+#   issue.sh sync-unfixed <unfixed.json> <image-ref> <source> <line>
+#       Ensures one "unfixed-cve" issue per line and HIGH or CRITICAL finding
+#       without a fix. With <source> "published-stable", it also closes the
+#       line's open unfixed-cve issues whose finding is gone from that scan.
 set -euo pipefail
 
 find_issue() {
@@ -38,12 +38,14 @@ close() {
 }
 
 sync_unfixed() {
-    local findings=$1 image=$2 source=$3 body titles
+    local findings=$1 image=$2 source=$3 line=$4 body titles suffix
     body=$(mktemp)
     titles=$(mktemp)
-    jq -r '.[] | "Unfixed \(.severity) \(.id) in \(.package)"' "$findings" | sort -u > "$titles"
+    # Each line has its own issues, so one line's scan never closes another's.
+    suffix=" on node $line"
+    jq -r --arg s "$suffix" '.[] | "Unfixed \(.severity) \(.id) in \(.package)\($s)"' "$findings" | sort -u > "$titles"
     jq -c '.[]' "$findings" | while read -r finding; do
-        title=$(jq -r '"Unfixed \(.severity) \(.id) in \(.package)"' <<<"$finding")
+        title=$(jq -r --arg s "$suffix" '"Unfixed \(.severity) \(.id) in \(.package)\($s)"' <<<"$finding")
         {
             echo "Trivy reports a ${title#Unfixed } with no fixed version available."
             echo
@@ -53,13 +55,14 @@ sync_unfixed() {
             echo
             echo "Policy: the image is still published, because no fixed package exists to"
             echo "build from. No VEX statement is generated. This issue closes when the"
-            echo "hourly scan of the published stable image no longer reports the finding."
+            echo "hourly scan of the line's published stable image no longer reports the finding."
         } > "$body"
         ensure unfixed-cve "$title" "$body"
     done
     if [ "$source" = published-stable ]; then
         gh issue list --state open --label unfixed-cve --limit 200 --json number,title \
-            | jq -r '.[] | "\(.number)\t\(.title)"' | while IFS=$'\t' read -r number title; do
+            | jq -r --arg s "$suffix" '.[] | select(.title | endswith($s)) | "\(.number)\t\(.title)"' \
+            | while IFS=$'\t' read -r number title; do
                 if ! grep -qxF "$title" "$titles"; then
                     gh issue close "$number" --comment "The hourly scan of the published stable image no longer reports this finding ($RUN_URL)." >/dev/null
                     echo "closed #$number: $title"
@@ -72,6 +75,6 @@ sync_unfixed() {
 case "${1:-}" in
     ensure) ensure "$2" "$3" "$4" ;;
     close) close "$2" "$3" "$4" ;;
-    sync-unfixed) sync_unfixed "$2" "$3" "$4" ;;
+    sync-unfixed) sync_unfixed "$2" "$3" "$4" "$5" ;;
     *) echo "usage: issue.sh ensure|close|sync-unfixed ..." >&2; exit 2 ;;
 esac

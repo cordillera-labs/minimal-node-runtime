@@ -14,6 +14,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 import lock as lockfile  # noqa: E402
 import policy  # noqa: E402
+import upstream  # noqa: E402
 
 NOW = datetime.datetime(2026, 11, 6, 3, 0, 0, tzinfo=datetime.timezone.utc)
 SHA = "a" * 64
@@ -361,7 +362,7 @@ class LockFile(unittest.TestCase):
 
     def test_rejects_a_value_outside_its_pattern(self):
         with self.assertRaises(lockfile.LockError):
-            lockfile.parse("NODE_VERSION=24.0.0\n")
+            lockfile.parse("NODE_VERSION=24.0\n")
         with self.assertRaises(lockfile.LockError):
             lockfile.parse("DEB_LIBC6_URL=https://deb.debian.org/x.deb\n")
         with self.assertRaises(lockfile.LockError):
@@ -401,12 +402,54 @@ class LockFile(unittest.TestCase):
                 handle.write("BUILDX_VERSION=v0.0.0\n")
             self.assertNotEqual(lockfile.build_definition_hash(root), before)
 
-    def test_the_committed_stable_lock_is_valid(self):
-        path = os.path.join(lockfile.REPO_ROOT, "state", "stable.lock")
-        lock = lockfile.load(path)
-        lockfile.require_complete(lock, lockfile.read_packages())
-        self.assertEqual(lock["SOURCE_DATE_EPOCH"], lockfile.derived_epoch(lock))
+    def test_every_committed_lock_is_valid_and_on_its_line(self):
+        lines = lockfile.lines()
+        self.assertIn("22", lines)
+        self.assertIn("24", lines)
+        for line in lines:
+            for channel in ("stable", "candidate"):
+                path = os.path.join(lockfile.REPO_ROOT, "state", line, f"{channel}.lock")
+                if channel == "candidate" and not os.path.exists(path):
+                    continue
+                with self.subTest(line=line, channel=channel):
+                    lock = lockfile.load(path)
+                    lockfile.require_complete(lock, lockfile.read_packages())
+                    self.assertEqual(lock["SOURCE_DATE_EPOCH"], lockfile.derived_epoch(lock))
+                    self.assertEqual(lockfile.line_of(lock), line)
 
+
+class Lines(unittest.TestCase):
+    def test_the_line_is_the_node_major(self):
+        lock = base_lock()
+        self.assertEqual(lockfile.line_of(lock), "22")
+        lock["NODE_VERSION"] = "24.22.2"
+        self.assertEqual(lockfile.line_of(lock), "24")
+
+    def test_the_immutable_tag_carries_the_line(self):
+        lock = base_lock()
+        lock["NODE_VERSION"] = "24.22.2"
+        self.assertTrue(lockfile.image_tag(lock).startswith("24.22.2-trixie-"))
+        lockfile.validate("PUBLISHED_TAG", lockfile.image_tag(lock))
+
+    def test_rejects_a_malformed_major(self):
+        for version in ("024.1.0", "v24.1.0", "24.1", "1234.0.0"):
+            with self.assertRaises(lockfile.LockError, msg=version):
+                lockfile.validate("NODE_VERSION", version)
+
+    def test_lines_are_the_state_directories_with_a_stable_lock(self):
+        with tempfile.TemporaryDirectory() as root:
+            for name, lock in (("22", True), ("24", True), ("26", False), ("notes", True)):
+                os.makedirs(os.path.join(root, "state", name))
+                if lock:
+                    open(os.path.join(root, "state", name, "stable.lock"), "w").close()
+            self.assertEqual(lockfile.lines(root), ["22", "24"])
+
+    def test_upstream_offers_only_releases_of_the_lock_major(self):
+        index = [{"version": v, "files": ["linux-x64"]} for v in
+                 ("v26.0.0", "v24.22.2", "v24.22.1", "v22.24.0", "v22.23.4", "v22.23.3", "v2.4.0", "v222.0.0")]
+        index.append({"version": "v22.25.0", "files": ["linux-arm64"]})
+        self.assertEqual([v for v, _ in upstream.line_entries(index, "22.23.4")], ["22.24.0", "22.23.4"])
+        self.assertEqual([v for v, _ in upstream.line_entries(index, "24.22.1")], ["24.22.2", "24.22.1"])
 
 if __name__ == "__main__":
     unittest.main()
