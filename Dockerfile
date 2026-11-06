@@ -1,0 +1,65 @@
+# check=skip=InvalidDefaultArgInFrom
+# A FROM scratch image that holds the Node.js 22 binary, the shared libraries
+# it links, a CA bundle and a nonroot user, and nothing else.
+#
+# Every input is pinned in state/*.lock and passed in as a build argument by
+# scripts/lock.py build-args. Build with scripts/build.sh, not by hand.
+#
+# No `# syntax=` line: the frontend is the one built into the pinned BuildKit,
+# so no extra image is pulled. The check directive above skips the warning
+# about HELPER_IMAGE having no default: the lock is its only pin, by design.
+
+ARG HELPER_IMAGE
+
+# ---- assemble: a helper stage that is never shipped -------------------------
+FROM ${HELPER_IMAGE} AS assemble
+
+ARG NODE_VERSION
+ARG NODE_SHA256
+ARG DEB_BASE_FILES_URL
+ARG DEB_BASE_FILES_SHA256
+ARG DEB_CA_CERTIFICATES_URL
+ARG DEB_CA_CERTIFICATES_SHA256
+ARG DEB_GCC_14_BASE_URL
+ARG DEB_GCC_14_BASE_SHA256
+ARG DEB_LIBC6_URL
+ARG DEB_LIBC6_SHA256
+ARG DEB_LIBGCC_S1_URL
+ARG DEB_LIBGCC_S1_SHA256
+ARG DEB_LIBSTDCXX6_URL
+ARG DEB_LIBSTDCXX6_SHA256
+ARG SOURCE_DATE_EPOCH
+
+# BuildKit verifies each download against the pinned SHA-256 and fails the
+# build on a mismatch. The Node checksum comes from a SHASUMS256.txt whose
+# signature scripts/upstream.py verified against node-release-keys.txt.
+ADD --checksum=sha256:${NODE_SHA256} https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz /in/node.tar.gz
+ADD --checksum=sha256:${DEB_BASE_FILES_SHA256} ${DEB_BASE_FILES_URL} /in/debs/base-files.deb
+ADD --checksum=sha256:${DEB_CA_CERTIFICATES_SHA256} ${DEB_CA_CERTIFICATES_URL} /in/debs/ca-certificates.deb
+ADD --checksum=sha256:${DEB_GCC_14_BASE_SHA256} ${DEB_GCC_14_BASE_URL} /in/debs/gcc-14-base.deb
+ADD --checksum=sha256:${DEB_LIBC6_SHA256} ${DEB_LIBC6_URL} /in/debs/libc6.deb
+ADD --checksum=sha256:${DEB_LIBGCC_S1_SHA256} ${DEB_LIBGCC_S1_URL} /in/debs/libgcc-s1.deb
+ADD --checksum=sha256:${DEB_LIBSTDCXX6_SHA256} ${DEB_LIBSTDCXX6_URL} /in/debs/libstdc++6.deb
+
+COPY packages.list /in/packages.list
+COPY scripts/assemble-rootfs.sh /in/assemble-rootfs.sh
+RUN NODE_VERSION="${NODE_VERSION}" SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
+    bash /in/assemble-rootfs.sh /in /rootfs /out
+
+# ---- manifest: the rootfs file list and loader output, for scripts/build.sh --
+FROM scratch AS manifest
+COPY --from=assemble /out/ /
+
+# ---- runtime ----------------------------------------------------------------
+FROM scratch AS runtime
+ARG NODE_VERSION
+COPY --from=assemble /rootfs/ /
+LABEL org.opencontainers.image.title="minimal-node-runtime" \
+      org.opencontainers.image.description="Node.js ${NODE_VERSION} on a FROM scratch base with the Debian 13 libraries it links" \
+      org.opencontainers.image.source="https://github.com/cordillera-labs/minimal-node-runtime" \
+      org.opencontainers.image.version="${NODE_VERSION}"
+ENV PATH=/nodejs/bin \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+USER 65532:65532
+WORKDIR /home/nonroot
+ENTRYPOINT ["/nodejs/bin/node"]

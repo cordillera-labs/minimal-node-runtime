@@ -1,0 +1,16 @@
+# Dependabot proposes bumps of the pinned GitHub Actions only. It never merges
+# them: a person reviews each pull request, and ci.yml checks it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - '*'
+    commit-message:
+      prefix: actions

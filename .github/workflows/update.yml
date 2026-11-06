@@ -1,0 +1,363 @@
+# The hourly run. It checks every input, and when an eligible change exists it
+# builds, gates, publishes and records the change in one run:
+#
+#   plan     scan the published stable digest with a current Trivy database,
+#            resolve the upstream inputs, and apply the update policy
+#            (scripts/policy.py).
+#   publish  build and publish the eligible lock (publish.yml).
+#   split    when that build was breaking and went to the candidate channel,
+#            build the non-breaking subset for stable.
+#   record   commit the published lock to main. The commit is the record of
+#            the rebuild and keeps the scheduled workflows active.
+#   report   open, update or close issues.
+#
+# Events made with GITHUB_TOKEN start no workflow runs, so nothing here relies
+# on the record commit triggering anything.
+name: update
+
+on:
+  schedule:
+    # Minute 17: GitHub documents the start of the hour as its peak load.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      policy: ${{ steps.plan.outputs.policy }}
+      lock_b64: ${{ steps.plan.outputs.lock_b64 }}
+      upstream_b64: ${{ steps.plan.outputs.upstream_b64 }}
+      signature_fault: ${{ steps.plan.outputs.signature_fault }}
+      published: ${{ steps.published.outputs.digest }}
+      unfixed_json: ${{ steps.scan-policy.outputs.unfixed_json }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the pins and the published digest
+        id: published
+        run: |
+          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/work"
+          echo "digest=$(python3 scripts/lock.py get state/stable.lock PUBLISHED_DIGEST)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: steps.published.outputs.digest != ''
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rescan the published stable digest
+        if: steps.published.outputs.digest != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_REPOSITORY }}@${{ steps.published.outputs.digest }}
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/published-scan.json
+          ignore-unfixed: false
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+          timeout: 10m
+
+      - name: List the unfixed findings
+        id: scan-policy
+        if: steps.published.outputs.digest != ''
+        run: |
+          # A fixable finding does not fail this job: the plan below treats a
+          # package update that fixes it as a security update.
+          scripts/vuln-policy.sh "$RUNNER_TEMP/work/published-scan.json" "$RUNNER_TEMP/work/unfixed.json" || true
+          echo "unfixed_json=$(jq -c . "$RUNNER_TEMP/work/unfixed.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the upstream inputs
+        run: python3 scripts/upstream.py resolve --base state/stable.lock --out "$RUNNER_TEMP/work/upstream.json"
+
+      - name: Apply the update policy
+        id: plan
+        run: |
+          work="$RUNNER_TEMP/work"
+          python3 scripts/policy.py plan --stable state/stable.lock --candidate state/candidate.lock \
+            --upstream "$work/upstream.json" --scan "$work/published-scan.json" --out-dir "$work/plan"
+          {
+            echo "action=$(jq -r .action "$work/plan/plan.json")"
+            echo "policy=$(jq -r .policy "$work/plan/plan.json")"
+            echo "upstream_b64=$(base64 -w0 "$work/upstream.json")"
+            if jq -e '.faults[] | select(.kind == "signature")' "$work/plan/plan.json" > /dev/null; then
+              echo "signature_fault=true"
+            fi
+            if [ -f "$work/plan/next.lock" ]; then
+              echo "lock_b64=$(base64 -w0 "$work/plan/next.lock")"
+            fi
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Plan: $(jq -r .summary "$work/plan/plan.json")"
+            jq -r '.pending[] | "- held: \(.)"' "$work/plan/plan.json"
+            jq -r '.warnings[] | "- warning: \(.)"' "$work/plan/plan.json"
+            jq -r '.faults[] | "- fault: \(.message)"' "$work/plan/plan.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.action == 'build'
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      lock_b64: ${{ needs.plan.outputs.lock_b64 }}
+      policy: ${{ needs.plan.outputs.policy }}
+      upstream_b64: ${{ needs.plan.outputs.upstream_b64 }}
+
+  split:
+    needs: [plan, publish]
+    if: needs.publish.outputs.split_lock_b64 != ''
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      lock_b64: ${{ needs.publish.outputs.split_lock_b64 }}
+      policy: stable-only
+      upstream_b64: ${{ needs.plan.outputs.upstream_b64 }}
+
+  record:
+    needs: [plan, publish, split]
+    if: always() && needs.publish.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Commit the published locks
+        env:
+          FIRST_CHANNEL: ${{ needs.publish.outputs.channel }}
+          FIRST_LOCK: ${{ needs.publish.outputs.lock_b64 }}
+          FIRST_MANIFEST: ${{ needs.publish.outputs.manifest_b64 }}
+          FIRST_RESULT: ${{ needs.publish.outputs.result }}
+          FIRST_RELEASE: ${{ needs.publish.outputs.release_url }}
+          FIRST_DIGEST: ${{ needs.publish.outputs.digest }}
+          SPLIT_OK: ${{ needs.split.result == 'success' }}
+          SPLIT_CHANNEL: ${{ needs.split.outputs.channel }}
+          SPLIT_LOCK: ${{ needs.split.outputs.lock_b64 }}
+          SPLIT_MANIFEST: ${{ needs.split.outputs.manifest_b64 }}
+          SPLIT_RESULT: ${{ needs.split.outputs.result }}
+          SPLIT_RELEASE: ${{ needs.split.outputs.release_url }}
+          SPLIT_DIGEST: ${{ needs.split.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          message=$(mktemp)
+          write() { # channel lock_b64 manifest_b64 result release digest
+            case "$1" in stable | candidate) ;; *) echo "invalid channel $1"; exit 1 ;; esac
+            printf '%s' "$2" | base64 -d > "state/$1.lock"
+            printf '%s' "$3" | base64 -d > "state/$1.rootfs"
+            python3 scripts/lock.py get "state/$1.lock" CHANNEL > /dev/null
+            echo "- $1: $4 $6 ${5:-}" >> "$message.body"
+            echo "$1"
+          }
+          : > "$message.body"
+          channels=$(write "$FIRST_CHANNEL" "$FIRST_LOCK" "$FIRST_MANIFEST" "$FIRST_RESULT" "$FIRST_RELEASE" "$FIRST_DIGEST")
+          if [ "$SPLIT_OK" = true ] && [ -n "$SPLIT_LOCK" ]; then
+            channels="$channels $(write "$SPLIT_CHANNEL" "$SPLIT_LOCK" "$SPLIT_MANIFEST" "$SPLIT_RESULT" "$SPLIT_RELEASE" "$SPLIT_DIGEST")"
+          fi
+          {
+            echo "Record the $(echo "$channels" | tr ' ' '+') publication"
+            echo
+            cat "$message.body"
+            echo
+            echo "Evidence: $RUN_URL"
+          } > "$message"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/
+          if git diff --cached --quiet; then
+            echo "nothing to record"
+            exit 0
+          fi
+          git commit -q -F "$message"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push attempt $attempt was rejected; rebasing onto main"
+            git pull --rebase origin main
+          done
+          exit 1
+
+  keepalive:
+    # The record commit keeps the scheduled workflows active (GitHub disables
+    # them in a public repository after 60 days without repository activity).
+    # When no input has changed for KEEPALIVE_DAYS, this commits a heartbeat.
+    needs: plan
+    if: needs.plan.outputs.action == 'none'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      KEEPALIVE_DAYS: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Commit a heartbeat when main has been quiet
+        run: |
+          last=$(git log -1 --format=%ct)
+          age_days=$(( ($(date +%s) - last) / 86400 ))
+          echo "the last commit on main is $age_days days old"
+          if [ "$age_days" -lt "$KEEPALIVE_DAYS" ]; then
+            exit 0
+          fi
+          date -u +%Y-%m-%dT%H:%M:%SZ > state/heartbeat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/heartbeat
+          git commit -q -m "Record a heartbeat: no input changed for $age_days days"
+          git push origin HEAD:main
+
+  report:
+    needs: [plan, publish, split, record]
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Report a signature fault
+        if: needs.plan.outputs.signature_fault == 'true' || needs.publish.outputs.signature_fault == 'true' || needs.split.outputs.signature_fault == 'true'
+        run: |
+          body=$(mktemp)
+          {
+            echo "A Node.js SHASUMS256.txt signature or checksum did not verify against node-release-keys.txt."
+            echo "No Node.js update is accepted until it verifies. Other inputs keep updating."
+            echo
+            echo "Check whether the release was signed by a new releaser (then add the fingerprint"
+            echo "in a reviewed change), or whether the download was tampered with."
+            echo
+            echo "Run: $RUN_URL"
+          } > "$body"
+          scripts/issue.sh ensure upstream-signature "Node.js release signature check failed" "$body"
+
+      - name: Report a failed run, or close the report after a success
+        env:
+          PLAN: ${{ needs.plan.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          SPLIT: ${{ needs.split.result }}
+          RECORD: ${{ needs.record.result }}
+        run: |
+          title="Update run failed"
+          if [ "$PLAN" = failure ] || [ "$PUBLISH" = failure ] || [ "$SPLIT" = failure ] || [ "$RECORD" = failure ]; then
+            body=$(mktemp)
+            {
+              echo "The latest failed update run: $RUN_URL"
+              echo
+              echo "| job | result |"
+              echo "|---|---|"
+              echo "| plan | $PLAN |"
+              echo "| publish | $PUBLISH |"
+              echo "| split | $SPLIT |"
+              echo "| record | $RECORD |"
+              echo
+              echo "A failed gate publishes nothing. The run log names the step that failed."
+              echo "The next hourly run tries again. This issue closes after a run with no failure."
+            } > "$body"
+            scripts/issue.sh ensure update-failure "$title" "$body"
+          elif [ "$PLAN" = success ]; then
+            scripts/issue.sh close update-failure "$title" "The run $RUN_URL completed without a failure."
+          fi
+
+      - name: Report unfixed findings
+        env:
+          PUBLISHED: ${{ needs.plan.outputs.published }}
+          PUBLISHED_UNFIXED: ${{ needs.plan.outputs.unfixed_json }}
+          BUILD_UNFIXED: ${{ needs.publish.outputs.unfixed_json }}
+          BUILD_DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          image=$(sed -n 's/^IMAGE_REPOSITORY=//p' toolchain.env)
+          if [ -n "$PUBLISHED" ] && [ -n "$PUBLISHED_UNFIXED" ]; then
+            printf '%s' "$PUBLISHED_UNFIXED" > published-unfixed.json
+            scripts/issue.sh sync-unfixed published-unfixed.json "$image@$PUBLISHED" published-stable
+          fi
+          if [ -n "$BUILD_UNFIXED" ] && [ -n "$BUILD_DIGEST" ]; then
+            printf '%s' "$BUILD_UNFIXED" > build-unfixed.json
+            scripts/issue.sh sync-unfixed build-unfixed.json "$image@$BUILD_DIGEST" new-build
+          fi
+
+      - name: Report a breaking change published to stable for security
+        if: needs.publish.outputs.security_breaking == 'true' || needs.split.outputs.security_breaking == 'true'
+        env:
+          FIRST: ${{ needs.publish.outputs.security_breaking == 'true' && needs.publish.outputs.tag || needs.split.outputs.tag }}
+          BREAKING: ${{ needs.publish.outputs.security_breaking == 'true' && needs.publish.outputs.breaking || needs.split.outputs.breaking }}
+        run: |
+          body=$(mktemp)
+          {
+            echo "A security fix was available only as a breaking change, so it went to the stable"
+            echo "channel through every gate, without the usual candidate validation."
+            echo
+            echo "- Release: $FIRST"
+            echo "- Breaking packages: $BREAKING"
+            echo "- Run: $RUN_URL"
+            echo
+            echo "Validate the stable tag in your stack, and pin the previous digest if it breaks."
+          } > "$body"
+          scripts/issue.sh ensure breaking "Breaking security change on stable: $FIRST" "$body"
+
+      - name: Report a candidate awaiting validation
+        if: needs.publish.outputs.channel == 'candidate' && needs.publish.outputs.result == 'published'
+        env:
+          TAG: ${{ needs.publish.outputs.tag }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          BREAKING: ${{ needs.publish.outputs.breaking }}
+          RELEASE: ${{ needs.publish.outputs.release_url }}
+        run: |
+          body=$(mktemp)
+          {
+            echo "A breaking change was published to the \`22-candidate\` channel only."
+            echo
+            echo "- Digest: \`$DIGEST\`"
+            echo "- Breaking packages: $BREAKING"
+            echo "- Release: $RELEASE"
+            echo
+            echo "Validate it in your stack, then run the promote workflow with this digest."
+          } > "$body"
+          scripts/issue.sh ensure candidate "Candidate $TAG awaits validation" "$body"

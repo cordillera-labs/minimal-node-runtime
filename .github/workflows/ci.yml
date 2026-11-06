@@ -1,0 +1,118 @@
+# Checks a pull request: unit tests, shellcheck, and the full build gate chain
+# on the stable lock with the pull request's build definition. Publishes nothing.
+name: ci
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests and shellcheck
+        run: |
+          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
+          python3 -m unittest discover -s tests -v
+          shellcheck scripts/*.sh
+
+      - name: Prepare a lock with this build definition
+        run: |
+          mkdir -p "$RUNNER_TEMP/work"
+          cp state/stable.lock "$RUNNER_TEMP/work/ci.lock"
+          python3 scripts/lock.py set "$RUNNER_TEMP/work/ci.lock" \
+            "BUILD_DEFINITION_SHA256=$(python3 scripts/lock.py build-definition)" PUBLISHED_DIGEST=
+          python3 scripts/upstream.py verify-node "$(python3 scripts/lock.py get state/stable.lock NODE_VERSION)" \
+            "$(python3 scripts/lock.py get state/stable.lock NODE_SHA256)"
+
+      - name: Install the pinned buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver: docker
+
+      - name: Build twice in fresh builders and compare
+        run: |
+          scripts/reproduce.sh "$RUNNER_TEMP/work/ci.lock" "$RUNNER_TEMP/work/out"
+          docker load -i "$RUNNER_TEMP/work/out/a/image.tar"
+          container=$(docker create minimal-node-runtime:build)
+          docker export "$container" | tar -t > "$RUNNER_TEMP/work/listing.txt"
+          docker rm "$container"
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/out/a/oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/scan.json
+          ignore-unfixed: false
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+          timeout: 10m
+
+      - name: Gate, policy and smoke test
+        run: |
+          work="$RUNNER_TEMP/work"
+          scripts/gate.sh "$work/scan.json" "$work/ci.lock" "$work/listing.txt"
+          scripts/vuln-policy.sh "$work/scan.json" "$work/unfixed.json"
+          scripts/smoke-test.sh minimal-node-runtime:build "$(python3 scripts/lock.py get "$work/ci.lock" NODE_VERSION)"
+          scripts/negative-control.sh build "$work/out/a/image.tar" "$work/ci.lock" "$work/neg"
+
+      - name: Scan the control without /etc/debian_version
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/neg/no-debian-version.oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/neg/no-debian-version.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Scan the control with an old libc6
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/neg/old-libc6.oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/neg/old-libc6.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Scan the control with a zlib1g entry
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/neg/zlib-entry.oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/neg/zlib-entry.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Check that every control is rejected
+        run: scripts/negative-control.sh check "$RUNNER_TEMP/work/neg" "$RUNNER_TEMP/work/ci.lock"
+
+      - name: Remove the builders
+        if: always()
+        run: docker buildx ls --format '{{.Name}}' | grep '^mnr-' | xargs -r -n1 docker buildx rm --force

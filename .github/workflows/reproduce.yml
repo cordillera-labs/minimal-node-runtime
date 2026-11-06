@@ -1,0 +1,97 @@
+# Weekly: rebuild each published lock from scratch, at the commit that built
+# it, in two fresh builders, and compare with the published digest. A
+# mismatch opens an issue.
+name: reproduce
+
+on:
+  schedule:
+    - cron: '43 5 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [stable, candidate]
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find the published lock
+        id: lock
+        env:
+          CHANNEL: ${{ matrix.channel }}
+        run: |
+          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
+          if [ ! -f "state/$CHANNEL.lock" ] || [ -z "$(python3 scripts/lock.py get "state/$CHANNEL.lock" PUBLISHED_DIGEST)" ]; then
+            echo "no published $CHANNEL digest"
+            exit 0
+          fi
+          cp "state/$CHANNEL.lock" "$RUNNER_TEMP/published.lock"
+          echo "commit=$(python3 scripts/lock.py get "state/$CHANNEL.lock" PUBLISHED_COMMIT)" >> "$GITHUB_OUTPUT"
+
+      - name: Install the pinned buildx
+        if: steps.lock.outputs.commit != ''
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver: docker
+
+      - name: Rebuild at the publishing commit and compare
+        if: steps.lock.outputs.commit != ''
+        env:
+          COMMIT: ${{ steps.lock.outputs.commit }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/source" "$COMMIT"
+          cd "$RUNNER_TEMP/source"
+          scripts/reproduce.sh "$RUNNER_TEMP/published.lock" "$RUNNER_TEMP/out"
+          published=$(python3 scripts/lock.py get "$RUNNER_TEMP/published.lock" PUBLISHED_DIGEST)
+          registry=$(docker buildx imagetools inspect "$IMAGE_REPOSITORY@$published" --format '{{json .Manifest}}' | jq -r .digest)
+          [ "$registry" = "$published" ] || { echo "the registry does not serve $published"; exit 1; }
+
+  report:
+    needs: reproduce
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      RESULT: ${{ needs.reproduce.result }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open or close the reproducibility issue
+        run: |
+          title="Published digest did not reproduce"
+          if [ "$RESULT" = failure ]; then
+            body=$(mktemp)
+            {
+              echo "The weekly rebuild of a published lock gave a different digest, or the"
+              echo "registry did not serve the published digest."
+              echo
+              echo "Run: $RUN_URL"
+              echo
+              echo "Until this is resolved, the claim that every digest reproduces from its lock does not hold."
+            } > "$body"
+            scripts/issue.sh ensure reproducibility "$title" "$body"
+          elif [ "$RESULT" = success ]; then
+            scripts/issue.sh close reproducibility "$title" "Reproduced by $RUN_URL"
+          fi

@@ -1,0 +1,439 @@
+# Builds one lock, runs every gate, and publishes the digest with its
+# signature, SBOM, scan and provenance. Called by update.yml only.
+#
+# Order: verify the Node.js signature, build twice in fresh builders (the
+# digests must match), gate, vulnerability policy, smoke test, negative
+# controls, channel decision. Nothing is pushed until all of them pass. The
+# push is by digest with no tag; the tags move only after the signature and
+# attestations exist.
+#
+# The keyless signing identity is this file at refs/heads/main:
+#   https://github.com/cordillera-labs/minimal-node-runtime/.github/workflows/publish.yml@refs/heads/main
+name: publish
+
+on:
+  workflow_call:
+    inputs:
+      lock_b64:
+        description: The lock to build, base64-encoded.
+        required: true
+        type: string
+      policy:
+        description: auto (stable or candidate by the rootfs manifest) or stable-only.
+        required: true
+        type: string
+      upstream_b64:
+        description: The upstream state the plan used, base64-encoded, attached to the release.
+        required: false
+        type: string
+        default: ''
+    outputs:
+      result:
+        description: published or unchanged
+        value: ${{ jobs.publish.outputs.result }}
+      channel:
+        value: ${{ jobs.publish.outputs.channel }}
+      digest:
+        value: ${{ jobs.publish.outputs.digest }}
+      tag:
+        value: ${{ jobs.publish.outputs.tag }}
+      release_url:
+        value: ${{ jobs.publish.outputs.release_url }}
+      lock_b64:
+        description: The lock with its publication record, base64-encoded.
+        value: ${{ jobs.publish.outputs.lock_b64 }}
+      manifest_b64:
+        value: ${{ jobs.publish.outputs.manifest_b64 }}
+      split_lock_b64:
+        description: A stable subset to build next, when the build went to the candidate channel.
+        value: ${{ jobs.publish.outputs.split_lock_b64 }}
+      breaking:
+        value: ${{ jobs.publish.outputs.breaking }}
+      security_breaking:
+        value: ${{ jobs.publish.outputs.security_breaking }}
+      unfixed_json:
+        value: ${{ jobs.publish.outputs.unfixed_json }}
+      signature_fault:
+        value: ${{ jobs.publish.outputs.signature_fault }}
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write          # the GitHub release
+      packages: write          # the push to GHCR, the signature and the attestations
+      id-token: write          # the keyless signature and the attestations
+      attestations: write
+      artifact-metadata: write # the storage record the provenance attestation creates
+    outputs:
+      result: ${{ steps.final.outputs.result }}
+      channel: ${{ steps.channel.outputs.channel }}
+      digest: ${{ steps.reproduce.outputs.digest }}
+      tag: ${{ steps.setup.outputs.tag }}
+      release_url: ${{ steps.release.outputs.url }}
+      lock_b64: ${{ steps.final.outputs.lock_b64 }}
+      manifest_b64: ${{ steps.final.outputs.manifest_b64 }}
+      split_lock_b64: ${{ steps.channel.outputs.split_lock_b64 }}
+      breaking: ${{ steps.channel.outputs.breaking }}
+      security_breaking: ${{ steps.channel.outputs.security_breaking }}
+      unfixed_json: ${{ steps.policy.outputs.unfixed_json }}
+      signature_fault: ${{ steps.node.outputs.signature_fault }}
+    env:
+      DOCKER_BUILD_SUMMARY: 'false'
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the pins and the lock
+        id: setup
+        env:
+          LOCK_B64: ${{ inputs.lock_b64 }}
+          UPSTREAM_B64: ${{ inputs.upstream_b64 }}
+          POLICY: ${{ inputs.policy }}
+        run: |
+          case "$POLICY" in auto | stable-only) ;; *) echo "invalid policy $POLICY"; exit 1 ;; esac
+          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
+          work="$RUNNER_TEMP/work"
+          mkdir -p "$work"
+          printf '%s' "$LOCK_B64" | base64 -d > "$work/build.lock"
+          printf '%s' "$UPSTREAM_B64" | base64 -d > "$work/upstream.json"
+          python3 scripts/lock.py check "$work/build.lock"
+          {
+            echo "tag=$(python3 scripts/lock.py tag "$work/build.lock")"
+            echo "node_version=$(python3 scripts/lock.py get "$work/build.lock" NODE_VERSION)"
+            echo "node_sha256=$(python3 scripts/lock.py get "$work/build.lock" NODE_SHA256)"
+            echo "build_args<<BUILD_ARGS_END"
+            python3 scripts/lock.py build-args "$work/build.lock"
+            echo "BUILD_ARGS_END"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the Node.js release signature
+        id: node
+        env:
+          NODE_VERSION: ${{ steps.setup.outputs.node_version }}
+          NODE_SHA256: ${{ steps.setup.outputs.node_sha256 }}
+        run: |
+          status=0
+          python3 scripts/upstream.py verify-node "$NODE_VERSION" "$NODE_SHA256" || status=$?
+          if [ "$status" = 3 ]; then
+            echo "signature_fault=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+      - name: Install the pinned buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver: docker
+
+      - name: Build twice in fresh builders and compare
+        id: reproduce
+        run: |
+          KEEP_BUILDER=1 scripts/reproduce.sh "$RUNNER_TEMP/work/build.lock" "$RUNNER_TEMP/work/out"
+          echo "digest=$(cat "$RUNNER_TEMP/work/out/digest")" >> "$GITHUB_OUTPUT"
+          echo "builder=$(cat "$RUNNER_TEMP/work/out/builder")" >> "$GITHUB_OUTPUT"
+
+      - name: Load the image and list its files
+        run: |
+          docker load -i "$RUNNER_TEMP/work/out/a/image.tar"
+          container=$(docker create minimal-node-runtime:build)
+          docker export "$container" | tar -t > "$RUNNER_TEMP/work/listing.txt"
+          docker rm "$container"
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/out/a/oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/scan.json
+          ignore-unfixed: false
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+          timeout: 10m
+
+      - name: Gate on what the scanner sees
+        run: |
+          scripts/gate.sh "$RUNNER_TEMP/work/scan.json" "$RUNNER_TEMP/work/build.lock" "$RUNNER_TEMP/work/listing.txt"
+
+      - name: Apply the vulnerability policy
+        id: policy
+        run: |
+          status=0
+          scripts/vuln-policy.sh "$RUNNER_TEMP/work/scan.json" "$RUNNER_TEMP/work/unfixed.json" || status=$?
+          echo "unfixed_json=$(jq -c . "$RUNNER_TEMP/work/unfixed.json")" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Smoke test
+        env:
+          NODE_VERSION: ${{ steps.setup.outputs.node_version }}
+        run: scripts/smoke-test.sh minimal-node-runtime:build "$NODE_VERSION"
+
+      - name: Build the negative controls
+        run: scripts/negative-control.sh build "$RUNNER_TEMP/work/out/a/image.tar" "$RUNNER_TEMP/work/build.lock" "$RUNNER_TEMP/work/neg"
+
+      - name: Scan the control without /etc/debian_version
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/neg/no-debian-version.oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/neg/no-debian-version.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Scan the control with an old libc6
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/neg/old-libc6.oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/neg/old-libc6.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Scan the control with a zlib1g entry
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/neg/zlib-entry.oci
+          scanners: vuln
+          vuln-type: os,library
+          list-all-pkgs: 'true'
+          format: json
+          output: ${{ runner.temp }}/work/neg/zlib-entry.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Check that every control is rejected
+        run: |
+          scripts/negative-control.sh check "$RUNNER_TEMP/work/neg" "$RUNNER_TEMP/work/build.lock"
+
+      - name: Choose the channel
+        id: channel
+        env:
+          POLICY: ${{ inputs.policy }}
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+        run: |
+          work="$RUNNER_TEMP/work"
+          python3 scripts/policy.py channel --lock "$work/build.lock" --stable state/stable.lock \
+            --stable-manifest state/stable.rootfs --manifest "$work/out/a/rootfs.manifest" \
+            --policy "$POLICY" --out-dir "$work/decision"
+          channel=$(jq -r .channel "$work/decision/decision.json")
+          {
+            echo "channel=$channel"
+            echo "breaking=$(jq -r '.breaking | join(",")' "$work/decision/decision.json")"
+            echo "security_breaking=$(jq -r .security_breaking "$work/decision/decision.json")"
+            if [ -f "$work/decision/split.lock" ]; then
+              echo "split_lock_b64=$(base64 -w0 "$work/decision/split.lock")"
+            fi
+          } >> "$GITHUB_OUTPUT"
+          if [ "$channel" = fail ]; then
+            jq -r .message "$work/decision/decision.json"
+            exit 1
+          fi
+          published=$(python3 scripts/lock.py get "state/$channel.lock" PUBLISHED_DIGEST 2>/dev/null || true)
+          if [ "$published" = "$DIGEST" ]; then
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate the SBOM
+        if: steps.channel.outputs.unchanged != 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: ${{ runner.temp }}/work/out/a/oci
+          format: cyclonedx
+          output: ${{ runner.temp }}/work/sbom.cdx.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Log in to GHCR
+        if: steps.channel.outputs.unchanged != 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest, from the cache of builder A
+        id: push
+        if: steps.channel.outputs.unchanged != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          builder: ${{ steps.reproduce.outputs.builder }}
+          context: .
+          file: Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          build-args: ${{ steps.setup.outputs.build_args }}
+          outputs: type=image,name=${{ env.IMAGE_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true,oci-mediatypes=true
+
+      - name: Check that the pushed digest is the tested digest
+        if: steps.channel.outputs.unchanged != 'true'
+        env:
+          PUSHED: ${{ steps.push.outputs.digest }}
+          TESTED: ${{ steps.reproduce.outputs.digest }}
+        run: |
+          if [ "$PUSHED" != "$TESTED" ]; then
+            echo "pushed $PUSHED, tested $TESTED: the untagged digest is not signed or tagged"
+            exit 1
+          fi
+
+      - name: Sign the digest (keyless)
+        if: steps.channel.outputs.unchanged != 'true'
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN -e GITHUB_ACTIONS \
+            -e HOME=/tmp -e DOCKER_CONFIG=/docker-config -v "$HOME/.docker:/docker-config:ro" \
+            "$COSIGN_IMAGE" sign --yes "$IMAGE_REPOSITORY@$DIGEST"
+
+      - name: Attest the scan result
+        if: steps.channel.outputs.unchanged != 'true'
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BUILDER_ID: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/publish.yml
+        run: |
+          work="$RUNNER_TEMP/work"
+          db=$(trivy version --cache-dir "$GITHUB_WORKSPACE/.cache/trivy" --format json | jq -r '.VulnerabilityDB.UpdatedAt // "unknown"')
+          finished=$(jq -r '.CreatedAt' "$work/scan.json")
+          scripts/vuln-predicate.sh "$work/scan.json" "$TRIVY_VERSION" "$db" "$finished" "$finished" > "$work/vuln-predicate.json"
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN -e GITHUB_ACTIONS \
+            -e HOME=/tmp -e DOCKER_CONFIG=/docker-config -v "$HOME/.docker:/docker-config:ro" \
+            -v "$work:/work:ro" \
+            "$COSIGN_IMAGE" attest --yes --type vuln --predicate /work/vuln-predicate.json "$IMAGE_REPOSITORY@$DIGEST"
+
+      - name: Attest the build provenance
+        if: steps.channel.outputs.unchanged != 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ steps.reproduce.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest the SBOM
+        if: steps.channel.outputs.unchanged != 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ steps.reproduce.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/work/sbom.cdx.json
+          push-to-registry: true
+
+      - name: Verify the signature and the attestations as a consumer would
+        if: steps.channel.outputs.unchanged != 'true'
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/publish\.yml@refs/heads/main$"
+          for check in verify "verify-attestation --type vuln"; do
+            # shellcheck disable=SC2086
+            docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e DOCKER_CONFIG=/docker-config -v "$HOME/.docker:/docker-config:ro" \
+              "$COSIGN_IMAGE" $check "$IMAGE_REPOSITORY@$DIGEST" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          done
+          signer="$GITHUB_REPOSITORY/.github/workflows/publish.yml"
+          gh attestation verify "oci://$IMAGE_REPOSITORY@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer"
+          gh attestation verify "oci://$IMAGE_REPOSITORY@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer" \
+            --predicate-type https://cyclonedx.org/bom
+
+      - name: Move the tags
+        if: steps.channel.outputs.unchanged != 'true'
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+          TAG: ${{ steps.setup.outputs.tag }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+        run: |
+          case "$CHANNEL" in
+            stable) tags="$TAG 22 22-trixie" ;;
+            candidate) tags="$TAG 22-candidate" ;;
+          esac
+          args=()
+          for tag in $tags; do args+=(-t "$IMAGE_REPOSITORY:$tag"); done
+          # --prefer-index=false copies the manifest as is, so the tag names the same digest.
+          docker buildx imagetools create --prefer-index=false "${args[@]}" "$IMAGE_REPOSITORY@$DIGEST"
+          for tag in $tags; do
+            resolved=$(docker buildx imagetools inspect "$IMAGE_REPOSITORY:$tag" --format '{{json .Manifest}}' | jq -r .digest)
+            [ "$resolved" = "$DIGEST" ] || { echo "$tag resolves to $resolved"; exit 1; }
+          done
+
+      - name: Create the release
+        id: release
+        if: steps.channel.outputs.unchanged != 'true'
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+          TAG: ${{ steps.setup.outputs.tag }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          work="$RUNNER_TEMP/work"
+          cp "$work/build.lock" "$work/inputs.lock"
+          cp "$work/out/a/rootfs.manifest" "$work/rootfs.manifest"
+          scripts/release-notes.sh "$work/build.lock" "state/$CHANNEL.lock" "$work/decision/decision.json" \
+            "$work/scan.json" "$DIGEST" "$TAG" "$CHANNEL" > "$work/notes.md"
+          prerelease=()
+          [ "$CHANNEL" = candidate ] && prerelease=(--prerelease)
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG ($CHANNEL)" \
+            --notes-file "$work/notes.md" "${prerelease[@]}" \
+            "$work/inputs.lock" "$work/rootfs.manifest" "$work/scan.json#trivy-report.json" \
+            "$work/sbom.cdx.json" "$work/upstream.json"
+          echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Write the publication record
+        id: final
+        env:
+          DIGEST: ${{ steps.reproduce.outputs.digest }}
+          TAG: ${{ steps.setup.outputs.tag }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          BREAKING: ${{ steps.channel.outputs.breaking }}
+          UNCHANGED: ${{ steps.channel.outputs.unchanged }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          work="$RUNNER_TEMP/work"
+          final="$work/$CHANNEL.lock"
+          cp "$work/build.lock" "$final"
+          if [ "$UNCHANGED" = true ]; then
+            # The same digest is already published; keep its record.
+            for key in PUBLISHED_DIGEST PUBLISHED_TAG PUBLISHED_COMMIT PUBLISHED_RELEASE PUBLISHED_RUN; do
+              python3 scripts/lock.py set "$final" "$key=$(python3 scripts/lock.py get "state/$CHANNEL.lock" "$key")"
+            done
+            echo "result=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/lock.py set "$final" "PUBLISHED_DIGEST=$DIGEST" "PUBLISHED_TAG=$TAG" \
+              "PUBLISHED_COMMIT=$GITHUB_SHA" "PUBLISHED_RELEASE=$RELEASE_URL" "PUBLISHED_RUN=$RUN_URL"
+            echo "result=published" >> "$GITHUB_OUTPUT"
+          fi
+          python3 scripts/lock.py set "$final" "CHANNEL=$CHANNEL" "BREAKING_PACKAGES=$BREAKING"
+          {
+            echo "lock_b64=$(base64 -w0 "$final")"
+            echo "manifest_b64=$(base64 -w0 "$work/out/a/rootfs.manifest")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Remove the builders
+        if: always()
+        run: docker buildx ls --format '{{.Name}}' | grep '^mnr-' | xargs -r -n1 docker buildx rm --force
