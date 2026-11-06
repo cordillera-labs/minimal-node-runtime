@@ -1,6 +1,6 @@
 # check=skip=InvalidDefaultArgInFrom
-# A FROM scratch image that holds one Node.js binary, the shared libraries it
-# links, a CA bundle and a nonroot user, and nothing else. Every line (Node.js
+# A FROM scratch image that holds one Node.js binary, every shared library of
+# the listed Debian packages, a CA bundle and a nonroot user, and nothing else. Every line (Node.js
 # major) builds from this one file.
 #
 # Every input is pinned in state/<line>/*.lock and passed in as a build
@@ -60,7 +60,7 @@ FROM scratch AS runtime
 ARG NODE_VERSION
 COPY --from=assemble /rootfs/ /
 LABEL org.opencontainers.image.title="minimal-node-runtime" \
-      org.opencontainers.image.description="Node.js ${NODE_VERSION} on a FROM scratch base with the Debian 13 libraries it links" \
+      org.opencontainers.image.description="Node.js ${NODE_VERSION} on a FROM scratch base with the Debian 13 shared libraries of glibc and the GCC runtime" \
       org.opencontainers.image.source="https://github.com/cordillera-labs/minimal-node-runtime" \
       org.opencontainers.image.version="${NODE_VERSION}"
 ENV PATH=/nodejs/bin \

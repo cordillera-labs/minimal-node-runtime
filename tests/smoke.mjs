@@ -1,6 +1,7 @@
 // Runs inside the image as its default user: /nodejs/bin/node /smoke/smoke.mjs
 // Each check prints one line. Any failure exits non-zero.
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
 import fs from 'node:fs';
 import https from 'node:https';
@@ -8,6 +9,31 @@ import os from 'node:os';
 import tls from 'node:tls';
 
 const BUNDLE = '/etc/ssl/certs/ca-certificates.crt';
+const LIBRARY_DIRECTORY = '/usr/lib/x86_64-linux-gnu';
+// The libc6 libraries that node does not link. Native addons need them: the
+// libvips inside sharp needs libresolv.so.2.
+const LIBC_LIBRARIES_NODE_DOES_NOT_LINK = [
+    'libanl.so.1', 'libBrokenLocale.so.1', 'libc_malloc_debug.so.0', 'libmemusage.so', 'libmvec.so.1',
+    'libnsl.so.1', 'libnss_compat.so.2', 'libnss_dns.so.2', 'libnss_files.so.2', 'libnss_hesiod.so.2',
+    'libpcprofile.so', 'libresolv.so.2', 'librt.so.1', 'libthread_db.so.1', 'libutil.so.1',
+];
+// Three libraries are checked for presence and content only. libmemusage.so and
+// libpcprofile.so are LD_PRELOAD profilers that print a report when loaded, and
+// libthread_db.so.1 takes its ps_* symbols from a debugger, so it cannot load
+// into a process that is not one.
+const NOT_LOADED_IN_PROCESS = new Set(['libmemusage.so', 'libpcprofile.so', 'libthread_db.so.1']);
+// dlopen succeeds for any shared library. node then reports that the library
+// registers no addon. A library that cannot load fails with another message.
+const loads_as_library = (path) => {
+    try {
+        process.dlopen({ exports: {} }, path);
+    } catch (error) {
+        return /did not self-register|napi_register_module|node_register_module/.test(error.message)
+            ? null
+            : error.message;
+    }
+    return null;
+};
 const checks = [];
 const check = (name, run) => checks.push({ name, run });
 
@@ -46,6 +72,37 @@ check('the TZ environment variable sets the local zone', () => {
 check('ICU is the full build (locale data beyond English)', () => {
     // A small-icu build answers in English: "Germany".
     assert.equal(new Intl.DisplayNames(['de'], { type: 'region' }).of('DE'), 'Deutschland');
+});
+check('the libc6 libraries that node does not link are present and load', () => {
+    for (const name of LIBC_LIBRARIES_NODE_DOES_NOT_LINK) {
+        const path = `${LIBRARY_DIRECTORY}/${name}`;
+        assert.ok(fs.existsSync(path), `${path} is missing`);
+        if (NOT_LOADED_IN_PROCESS.has(name)) continue;
+        assert.equal(loads_as_library(path), null, `${path} does not load`);
+    }
+});
+check('every shared library in the dpkg file lists is present, intact and loads', () => {
+    const status_directory = '/var/lib/dpkg/status.d';
+    const library_pattern = /^usr\/lib(64)?(\/x86_64-linux-gnu)?\/[^/]+\.so(\.[0-9]+)*$/;
+    let library_count = 0;
+    for (const file_name of fs.readdirSync(status_directory).filter((name) => name.endsWith('.md5sums'))) {
+        for (const line of fs.readFileSync(`${status_directory}/${file_name}`, 'utf8').split('\n').filter(Boolean)) {
+            const [md5, relative_path] = [line.slice(0, 32), line.slice(34)];
+            if (!library_pattern.test(relative_path)) continue;
+            const path = `/${relative_path}`;
+            const content = fs.readFileSync(path);
+            assert.equal(crypto.createHash('md5').update(content).digest('hex'), md5, `${path} differs from the package`);
+            if (!NOT_LOADED_IN_PROCESS.has(relative_path.split('/').pop())) {
+                assert.equal(loads_as_library(path), null, `${path} does not load`);
+            }
+            library_count += 1;
+        }
+    }
+    // libc6 ships 20 libraries, libstdc++6 and libgcc-s1 one file each (and a link).
+    assert.ok(library_count >= 22, `only ${library_count} libraries are listed`);
+});
+check('the gconv plug-ins are not shipped', () => {
+    assert.equal(fs.existsSync(`${LIBRARY_DIRECTORY}/gconv`), false);
 });
 check('/etc/hosts lookup through glibc', async () => {
     const { address } = await dns.lookup('localhost', { family: 4 });

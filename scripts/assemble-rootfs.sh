@@ -9,8 +9,12 @@
 #
 # Rules it enforces:
 #   - the downloaded packages are exactly the packages in packages.list;
-#   - the shipped libraries are exactly what the node binary links, resolved
-#     with the dynamic loader from the pinned libc6;
+#   - node links only libraries that the pinned packages provide, checked with
+#     the dynamic loader from the pinned libc6;
+#   - the shipped libraries are every shared library of each listed package: the
+#     files of the .deb that match *.so or *.so.<number> directly in a library
+#     directory, with their symlinks. Plug-in modules in subdirectories, such as
+#     libc6's gconv, are not libraries and do not ship;
 #   - every shipped package has a dpkg status entry and its copyright file, and
 #     no other package has an entry;
 #   - every file in the rootfs is accounted for in the manifest.
@@ -99,7 +103,7 @@ install -D -m 0644 "$stage/node/LICENSE" "$root/nodejs/LICENSE"
 generated node nodejs/bin/node
 generated node nodejs/LICENSE
 
-# ---- 4. the libraries node links ---------------------------------------------------
+# ---- 4. the libraries: what node links, then every library of each package ---------
 libdir="$stage/all/usr/lib/x86_64-linux-gnu"
 loader="$libdir/ld-linux-x86-64.so.2"
 [ -x "$loader" ] || fail "libc6 does not provide $loader"
@@ -133,6 +137,23 @@ for path in $resolved; do
     done
     [ -n "$owner" ] || fail "no listed package contains $rel"
     ship "$owner" "$rel"
+done
+
+# Every shared library of each listed package. The set comes from the file list
+# of the .deb, so it follows each glibc or GCC update. A library sits directly
+# in usr/lib, usr/lib/<triplet> or usr/lib64. A deeper path, such as
+# usr/lib/x86_64-linux-gnu/gconv/*.so, is a plug-in that glibc loads only through
+# a gconv-modules configuration, and does not ship. The loop covers the
+# nss libraries (libnss_*.so.2) and libresolv.so.2 of libc6 as well as the
+# libraries that node links.
+library_pattern='^usr/lib(64)?(/x86_64-linux-gnu)?/[^/]+\.so(\.[0-9]+)*$'
+for package in $expected_packages; do
+    library_list="$stage/libraries-$package"
+    dpkg-deb --fsys-tarfile "$in_dir/debs/$package.deb" | tar -t \
+        | sed 's|^\./||; s|/$||' | { grep -E "$library_pattern" || true; } | sort > "$library_list"
+    while read -r rel; do
+        ship "$package" "$rel"
+    done < "$library_list"
 done
 
 # ---- 5. CA bundle -------------------------------------------------------------------
