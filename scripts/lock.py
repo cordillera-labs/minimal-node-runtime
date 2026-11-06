@@ -18,7 +18,7 @@ Usage:
   lock.py get <lock> <KEY>             print one value
   lock.py inputs-hash <lock>           print the hash of the input keys
   lock.py tag <lock>                   print the immutable image tag
-  lock.py debs <lock>                  print package, version, sha256, url, asset name
+  lock.py debs <lock>                  print package, version, sha256, url, asset name, suite
   lock.py set <lock> KEY=VALUE...      set keys and rewrite the file
   lock.py build-definition             print the hash of the build definition
 """
@@ -260,13 +260,13 @@ def asset_name(package, version):
 
 
 def debs(lock, packages):
-    """One (package, version, sha256, url, asset name) per pinned package."""
+    """One (package, version, sha256, url, asset name, suite) per pinned package."""
     require_complete(lock, packages)
     rows = []
     for package in packages:
         prefix = f"DEB_{package_key(package)}_"
         rows.append((package, lock[prefix + "VERSION"], lock[prefix + "SHA256"], lock[prefix + "URL"],
-                     asset_name(package, lock[prefix + "VERSION"])))
+                     asset_name(package, lock[prefix + "VERSION"]), lock[prefix + "SUITE"]))
     return rows
 
 
