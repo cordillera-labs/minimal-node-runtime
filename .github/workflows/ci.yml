@@ -26,6 +26,7 @@ jobs:
       - name: Unit tests and shellcheck
         run: |
           python3 -m unittest discover -s tests -v
+          node --test tests/ca-distrust.test.cjs
           shellcheck scripts/*.sh
 
       - name: List the lines

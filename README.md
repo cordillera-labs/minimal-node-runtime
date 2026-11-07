@@ -41,6 +41,11 @@ to enforce exclusions for Node TLS clients, use
 `NODE_OPTIONS=--use-openssl-ca` to select the image's `SSL_CERT_FILE` store.
 See [certificate selection](docs/contents.md#runtime-configuration).
 
+A separate, optional [live CA distrust feature](docs/hot-ca-distrust.md)
+can remove trusted roots for new TLS connections in running Node processes
+from an operator-managed, read-only mounted policy file. It doesn't require
+an image rebuild and cannot add new roots.
+
 Full inventory: [docs/contents.md](docs/contents.md).
 
 ## Use it
