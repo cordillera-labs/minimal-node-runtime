@@ -167,6 +167,9 @@ jobs:
         with:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker
+          # Fetch the pinned buildx every run instead of restoring it from the
+          # Actions cache, which another workflow run can write.
+          cache-binary: false
 
       - name: Build twice in fresh builders and compare
         id: reproduce
@@ -387,9 +390,11 @@ jobs:
             echo "release=$release"
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
-          echo "### Already published for $DIGEST" >> "$GITHUB_STEP_SUMMARY"
-          echo "- release $TAG: $release" >> "$GITHUB_STEP_SUMMARY"
-          echo "- tag $TAG: $tag" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Already published for $DIGEST"
+            echo "- release $TAG: $release"
+            echo "- tag $TAG: $tag"
+          } >> "$GITHUB_STEP_SUMMARY"
           # A check that does not verify counts as missing, and the step below
           # creates it. The final verification checks all four either way.
           for check in signature vuln provenance sbom; do

@@ -74,6 +74,9 @@ jobs:
         with:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker
+          # Fetch the pinned buildx every run instead of restoring it from the
+          # Actions cache, which another workflow run can write.
+          cache-binary: false
 
       - name: Rebuild at the publishing commit and compare
         if: steps.lock.outputs.commit != ''

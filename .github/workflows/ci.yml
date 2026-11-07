@@ -1,6 +1,7 @@
-# Checks a pull request: unit tests, shellcheck, and the full build gate chain
-# on the stable lock of every line with the pull request's build definition.
-# Publishes nothing. The check job passes only when all of them pass.
+# Checks a pull request: unit tests, shellcheck, the workflow lint, and the
+# full build gate chain on the stable lock of every line with the pull
+# request's build definition. Publishes nothing. The check job passes only when
+# all of them pass.
 name: ci
 
 on:
@@ -33,6 +34,20 @@ jobs:
           lines=$(python3 scripts/lock.py lines)
           jq -e 'type == "array" and length > 0 and all(test("^[1-9][0-9]{0,2}$"))' <<<"$lines" > /dev/null
           echo "lines=$lines" >> "$GITHUB_OUTPUT"
+
+  workflow-lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: zizmor and actionlint
+        run: scripts/workflow-lint.sh
 
   build:
     needs: unit
@@ -68,6 +83,9 @@ jobs:
         with:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker
+          # Fetch the pinned buildx every run instead of restoring it from the
+          # Actions cache, which another workflow run can write.
+          cache-binary: false
 
       - name: Build twice in fresh builders and compare
         run: |
@@ -168,8 +186,9 @@ jobs:
           done
 
   check:
-    # The one status to require: unit tests and every line's build passed.
-    needs: [unit, build]
+    # The one status to require: unit tests, the workflow lint and every line's
+    # build passed.
+    needs: [unit, workflow-lint, build]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -178,7 +197,8 @@ jobs:
       - name: Require every job to pass
         env:
           UNIT: ${{ needs.unit.result }}
+          LINT: ${{ needs.workflow-lint.result }}
           BUILD: ${{ needs.build.result }}
         run: |
-          echo "unit: $UNIT, build: $BUILD"
-          [ "$UNIT" = success ] && [ "$BUILD" = success ]
+          echo "unit: $UNIT, workflow-lint: $LINT, build: $BUILD"
+          [ "$UNIT" = success ] && [ "$LINT" = success ] && [ "$BUILD" = success ]

@@ -130,7 +130,9 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    uses: ./.github/workflows/publish.yml
+    # A job-level call resolves ./ from the calling commit, not the runner
+    # filesystem. actionlint 1.7.12 rejects the $/ form zizmor suggests.
+    uses: ./.github/workflows/publish.yml # zizmor: ignore[self-repository]
     with:
       line: ${{ inputs.line }}
       lock_b64: ${{ needs.plan.outputs.lock_b64 }}
@@ -146,7 +148,9 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    uses: ./.github/workflows/publish.yml
+    # A job-level call resolves ./ from the calling commit, not the runner
+    # filesystem. actionlint 1.7.12 rejects the $/ form zizmor suggests.
+    uses: ./.github/workflows/publish.yml # zizmor: ignore[self-repository]
     with:
       line: ${{ inputs.line }}
       lock_b64: ${{ needs.publish.outputs.split_lock_b64 }}
@@ -165,6 +169,10 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job pushes the record commit to main with the job token. The checkout
+          # keeps it under $RUNNER_TEMP, and the job uploads no artifacts.
+          persist-credentials: true
 
       - name: Commit the published locks
         env:

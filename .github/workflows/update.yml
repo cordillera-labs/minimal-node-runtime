@@ -63,7 +63,9 @@ jobs:
       attestations: write
       artifact-metadata: write
       issues: write
-    uses: ./.github/workflows/line.yml
+    # A job-level call resolves ./ from the calling commit, not the runner
+    # filesystem. actionlint 1.7.12 rejects the $/ form zizmor suggests.
+    uses: ./.github/workflows/line.yml # zizmor: ignore[self-repository]
     with:
       line: ${{ matrix.line }}
 
@@ -135,6 +137,10 @@ jobs:
           # main as it is now, with any record commit this run made.
           ref: main
           fetch-depth: 1
+          # This job pushes the heartbeat commit to main with the job token.
+          # The checkout keeps it under $RUNNER_TEMP, and the job uploads no
+          # artifacts.
+          persist-credentials: true
 
       - name: Commit a heartbeat when main has been quiet
         run: |
