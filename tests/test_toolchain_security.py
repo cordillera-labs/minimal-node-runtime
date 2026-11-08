@@ -35,6 +35,9 @@ class Ranges(unittest.TestCase):
         self.assertTrue(sec.affected((0, 33, 1), ">= 0.26.0, < 0.34.2"))
         self.assertFalse(sec.affected((0, 34, 2), ">= 0.26.0, < 0.34.2"))
         self.assertTrue(sec.affected((0, 34, 1), "> 0.34.0, <= 0.34.1"))
+        self.assertTrue(sec.affected((0, 33, 1), "v0.26.0 - v0.34.1"))
+        self.assertFalse(sec.affected((0, 34, 2), "v0.26.0 - v0.34.1"))
+        self.assertIsNone(sec.affected((0, 33, 1), "v0.35.1 - v0.34.1"))
         self.assertTrue(sec.affected((2, 6, 5), "= 2.6.5"))
         for bad in ("", "*", "^2.6", "<= v2.6.x", "<2.6.5; rm -rf ~", "2.6.5", None,
                     "> 9.0.0, UNKNOWN"):
@@ -65,6 +68,32 @@ class Selection(unittest.TestCase):
         self.assertEqual(result["to"],"v0.34.2")
         self.assertTrue(result["cooldown_bypassed"])
         self.assertEqual(result["advisories"],["GHSA-abcd-1234-efgh"])
+
+    def test_untyped_buildkit_cve_advisory_with_version_span(self):
+        entry=advisory("github.com/moby/buildkit","0.26.0","0.34.2","v0.34.2+",
+                       cve_id="CVE-2026-121522")
+        item=entry["vulnerabilities"][0]
+        item["package"]={"ecosystem":"other","name":None}
+        item["vulnerable_version_range"]="v0.26.0 - v0.34.1"
+        result=sec.pick("buildkit","moby/buildkit","v0.33.1",
+                        [release("v0.34.1"),release("v0.34.2")],[entry])
+        self.assertEqual(result["to"],"v0.34.2")
+
+    def test_untyped_buildx_cve_with_comparison_range(self):
+        entry=advisory("github.com/docker/buildx","0.19.0","0.38.1","v0.38.1+",
+                       cve_id="CVE-2026-121541")
+        item=entry["vulnerabilities"][0]
+        item["package"]=None
+        item["vulnerable_version_range"]="<=v0.38.0"
+        result=sec.pick("buildx","docker/buildx","v0.37.2",
+                        [release("v0.38.1"),release("v0.38.2")],[entry])
+        self.assertEqual(result["to"],"v0.38.1")
+
+    def test_untyped_advisory_without_cve_cannot_upgrade(self):
+        entry=advisory("github.com/moby/buildkit","0.26.0","0.34.2","v0.34.2+")
+        entry["vulnerabilities"][0]["package"]={"ecosystem":"other","name":None}
+        self.assertIsNone(sec.pick("buildkit","moby/buildkit","v0.33.1",
+                                   [release("v0.34.2")],[entry]))
 
     def test_cosign_uses_patched_major_2_not_major_3(self):
         releases=[release("v3.1.4"),release("v2.6.5"),release("v2.6.4")]
