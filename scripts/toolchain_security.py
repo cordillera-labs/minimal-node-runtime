@@ -172,8 +172,8 @@ def github_list(url):
         # fetch. A second failure is a fault, never a safe-to-upgrade result.
         if "HTTP 403" not in str(exc) and "HTTP 401" not in str(exc):
             raise
-        headers.pop("Authorization", None)
-        raw = upstream.get(url, headers=headers)
+        public_headers = {key: value for key, value in headers.items() if key != "Authorization"}
+        raw = upstream.get(url, headers=public_headers)
     result = json.loads(raw)
     if not isinstance(result, list):
         raise ValueError("GitHub did not return an array")
