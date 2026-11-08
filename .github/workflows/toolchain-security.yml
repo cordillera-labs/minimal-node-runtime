@@ -1,0 +1,195 @@
+# Security-only toolchain fast path. Only direct published GHSA fixed-version
+# evidence can bypass cooldown. One pin per run, full CI, no admin bypass.
+name: toolchain-security
+
+on:
+  schedule:
+    - cron: '31 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: toolchain-security
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 105
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: true # zizmor: ignore[artipacked] needed to push trusted pin-only branch
+
+      - name: Read upstream security advisories and stable releases
+        id: plan
+        run: |
+          python3 scripts/toolchain_security.py plan --out "$RUNNER_TEMP/toolchain-security.json"
+          if jq -e '.faults | length > 0' "$RUNNER_TEMP/toolchain-security.json" >/dev/null; then
+            {
+              echo 'Some security advisories could not be inspected; those tools were skipped.'
+              echo
+              jq -r '.faults[] | "- " + .' "$RUNNER_TEMP/toolchain-security.json"
+              echo "Run: $RUN_URL"
+            } > "$RUNNER_TEMP/toolchain-fault.md"
+            scripts/issue.sh ensure toolchain-security-fault \
+              'Toolchain security advisory lookup failed' "$RUNNER_TEMP/toolchain-fault.md"
+          else
+            scripts/issue.sh close toolchain-security-fault \
+              'Toolchain security advisory lookup failed' 'Advisory lookups recovered.'
+          fi
+          if jq -e '.selected != null' "$RUNNER_TEMP/toolchain-security.json" >/dev/null; then
+            echo 'selected=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'selected=false' >> "$GITHUB_OUTPUT"
+            echo 'No direct GHSA-patched pin qualifies for automatic upgrade.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Never collide with an existing pending security PR
+        id: pending
+        if: steps.plan.outputs.selected == 'true'
+        run: |
+          existing=$(gh pr list --state open --label toolchain-security-auto \
+            --json number --jq '.[0].number // empty')
+          if [[ -n "$existing" ]]; then
+            echo "Pending automated PR #$existing; not opening another."
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve pinned digest and prepare exactly one security pin
+        id: propose
+        if: steps.plan.outputs.selected == 'true' && steps.pending.outputs.skip == 'false'
+        run: |
+          plan="$RUNNER_TEMP/toolchain-security.json"
+          tool=$(jq -er '.selected.tool' "$plan")
+          old=$(jq -er '.selected.from' "$plan")
+          new=$(jq -er '.selected.to' "$plan")
+          key=$(jq -er '.selected.key' "$plan")
+          [[ "$tool" =~ ^(buildkit|buildx|cosign|trivy)$ ]] || exit 1
+          [[ "$old" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ "$new" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ "$key" =~ ^(BUILDKIT_IMAGE|BUILDX_VERSION|COSIGN_IMAGE|TRIVY_VERSION)$ ]] || exit 1
+          git fetch --quiet origin main
+          git switch -c "security/toolchain-$tool-$new-$GITHUB_RUN_ID" origin/main
+          branch=$(git branch --show-current)
+          digest=''
+          case "$tool" in
+            buildkit) reference="moby/buildkit:$new" ;;
+            cosign) reference="gcr.io/projectsigstore/cosign:$new" ;;
+            *) reference='' ;;
+          esac
+          if [[ -n "$reference" ]]; then
+            digest=$(docker buildx imagetools inspect "$reference" \
+              --format '{{json .Manifest}}' | jq -er '.digest')
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+          fi
+          args=()
+          if [[ -n "$digest" ]]; then args=(--digest "$digest"); fi
+          python3 scripts/toolchain_security.py apply \
+            --plan "$plan" --toolchain toolchain.env "${args[@]}"
+          [ "$(git diff --name-only)" = toolchain.env ] || { echo 'More than one changed file'; exit 1; }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- toolchain.env
+          git commit -m "Security: pin $tool $old to $new"
+          git push --set-upstream origin "$branch"
+          {
+            echo "branch=$branch"
+            echo "head=$(git rev-parse HEAD)"
+            echo "tool=$tool"
+            echo "new=$new"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create auditable security PR
+        id: pr
+        if: steps.propose.outcome == 'success'
+        env:
+          BRANCH: ${{ steps.propose.outputs.branch }}
+          TOOL: ${{ steps.propose.outputs.tool }}
+          VERSION: ${{ steps.propose.outputs.new }}
+        run: |
+          gh label create toolchain-security-auto --force \
+            --description 'GHSA-backed automated toolchain pin upgrade' >/dev/null
+          {
+            echo "Automated GHSA-backed toolchain security update: $TOOL $VERSION."
+            echo
+            jq -r '.selected | "Pinned: \(.from)\nFixed: \(.to)\nRelease: \(.release_url)\nAdvisories: \(.advisories | join(", "))"' \
+              "$RUNNER_TEMP/toolchain-security.json"
+            echo
+            echo 'Published direct advisories identify the pinned version as affected.'
+            echo 'No major version change; image pins contain the verified registry digest.'
+            echo 'The bot explicitly dispatches full read-only CI on the exact commit;'
+            echo 'CI must pass both Node lines, all gates and reproducibility before merge.'
+            echo "Source: $RUN_URL"
+          } > "$RUNNER_TEMP/security-pr.md"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Security: upgrade $TOOL to $VERSION" \
+            --body-file "$RUNNER_TEMP/security-pr.md" --label toolchain-security-auto
+          number=$(gh pr list --state open --head "$BRANCH" --json number \
+            --jq '.[0].number // empty')
+          [[ "$number" =~ ^[0-9]+$ ]] || exit 1
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Explicitly dispatch full read-only CI (bot PR events are suppressed)
+        if: steps.pr.outcome == 'success'
+        env:
+          BRANCH: ${{ steps.propose.outputs.branch }}
+          HEAD: ${{ steps.propose.outputs.head }}
+        run: |
+          gh workflow run ci.yml --ref "$BRANCH"
+          child=''
+          for attempt in $(seq 1 40); do
+            echo "Waiting for exact-head CI run: poll $attempt"
+            child=$(gh run list --workflow ci.yml --branch "$BRANCH" \
+              --event workflow_dispatch --limit 20 --json databaseId,headSha \
+              --jq ".[] | select(.headSha == \"$HEAD\") | .databaseId" | head -1)
+            if [[ "$child" =~ ^[0-9]+$ ]]; then break; fi
+            sleep 5
+          done
+          [[ "$child" =~ ^[0-9]+$ ]] || { echo 'No dispatched CI run observed'; exit 1; }
+          echo "Testing: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$child"
+          gh run watch "$child" --exit-status
+          echo "Full CI passed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$child" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Merge only after full CI passes and trigger normal publishing
+        if: steps.pr.outcome == 'success'
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          HEAD: ${{ steps.propose.outputs.head }}
+        run: |
+          actual=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          [ "$actual" = "$HEAD" ] || { echo 'PR head changed after CI'; exit 1; }
+          # Honor branch protection; never use --admin or force.
+          gh pr merge "$PR" --squash --delete-branch
+          gh workflow run update.yml --ref main
+          echo "Merged security pin PR #$PR and dispatched normal publication pipeline." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Alert when an automatic security upgrade was interrupted
+        if: failure()
+        run: |
+          {
+            echo 'A verified toolchain security upgrade did not finish.'
+            echo 'Inspect any pending PR, failing CI, digest lookup or merge protection.'
+            echo
+            echo "Run: $RUN_URL"
+          } > "$RUNNER_TEMP/security-failure.md"
+          scripts/issue.sh ensure toolchain-security-failure \
+            'Automated toolchain security update did not finish' \
+            "$RUNNER_TEMP/security-failure.md"
