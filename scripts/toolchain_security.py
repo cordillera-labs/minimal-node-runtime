@@ -53,17 +53,18 @@ def affected(v, specification):
     tokens = specification.split(",")
     if len(tokens) > 8:
         return None
+    parsed = []
     for token in tokens:
         match = BOUND.fullmatch(token.strip())
         if not match:
             return None
         op, *numbers = match.groups()
-        bound = tuple(map(int, numbers))
-        ok = {">": v > bound, ">=": v >= bound, "<": v < bound,
-              "<=": v <= bound, "=": v == bound}[op]
-        if not ok:
-            return False
-    return True
+        parsed.append((op, tuple(map(int, numbers))))
+    # Validate the *entire* range before declaring a version unaffected.
+    # Otherwise a malformed final clause after a false first clause could
+    # silently bypass our fail-closed advisory validation.
+    return all({">": v > bound, ">=": v >= bound, "<": v < bound,
+                "<=": v <= bound, "=": v == bound}[op] for op, bound in parsed)
 
 
 def direct_entries(tool, advisory):
