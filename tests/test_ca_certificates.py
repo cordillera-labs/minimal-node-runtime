@@ -78,7 +78,7 @@ class CertificateSelection(unittest.TestCase):
         self.put("mozilla/B.crt", b"not a certificate\n")
         result = self.select()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not one PEM certificate", result.stderr)
+        self.assertIn("invalid PEM", result.stderr)
 
     def test_automatic_fingerprint_excludes_bundled_and_system_cas(self):
         digest = hashlib.sha256(b"B").hexdigest()
