@@ -10,7 +10,9 @@ bundle=${3:?output bundle required}
 automatic=${4:-/dev/null}
 exclusion_hashes=${5:-/dev/null}
 fail() { echo "select-ca-certificates: $*" >&2; exit 1; }
-[[ -d "$cert_dir" && -f "$manual" && -f "$automatic" ]] || fail "missing input directory or exclusions file"
+[[ -d "$cert_dir" ]] || fail "missing certificate directory"
+[[ -f "$manual" ]] || fail "missing exclusions file"
+[[ -f "$automatic" ]] || fail "missing automatic exclusions file"
 cert_dir=${cert_dir%/}
 declare -A manual_exclusions=() automatic_hashes=()
 while IFS= read -r entry || [[ -n "$entry" ]]; do
