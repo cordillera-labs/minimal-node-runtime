@@ -1,0 +1,262 @@
+# Opt-in, isolated proof of GitHub dispatch -> GHCR distrust image publication.
+# Never updates main, stable/candidate image tags, or genuine CA policy.
+name: ca-deployment-proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Start on main; publish is reserved for the proof branch.
+        type: choice
+        options: [start, publish]
+        default: start
+      source_run:
+        description: Populated by the start phase for the dispatched child.
+        type: string
+        required: false
+
+permissions: {}
+
+jobs:
+  start:
+    if: github.ref == 'refs/heads/main' && inputs.phase == 'start'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    permissions:
+      contents: write
+      actions: write
+      packages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true # required only to push the isolated proof branch
+      - name: Read pinned tool and registry configuration
+        run: grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
+      - name: Login for published baseline images
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Choose a real root trusted in both published Node images
+        run: |
+          mkdir -p proof/canary
+          for line in 22 24; do
+            docker pull "$IMAGE_REPOSITORY:$line"
+            docker run --rm --pull never "$IMAGE_REPOSITORY:$line" -e '
+              const tls = require("node:tls");
+              const { createHash, X509Certificate } = require("node:crypto");
+              const sha = pem => createHash("sha256").update(new X509Certificate(pem).raw).digest("hex");
+              console.log(JSON.stringify(tls.getCACertificates("default").map(sha).sort()));
+            ' > "proof/canary/base-$line.json"
+          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          a = set(json.loads(Path('proof/canary/base-22.json').read_text()))
+          b = set(json.loads(Path('proof/canary/base-24.json').read_text()))
+          excluded = {line.strip() for line in Path('certificates.auto.exclude').read_text().splitlines()
+                      if line.strip() and not line.startswith('#')}
+          common = sorted((a & b) - excluded)
+          if not common: raise SystemExit('no common non-excluded root')
+          Path('proof/canary/target-hash.txt').write_text(common[0] + '\n')
+          print('Selected fingerprint: ',common[0])
+          PY
+          docker run --rm --pull never \
+            -e ROOT_SHA="$(cat proof/canary/target-hash.txt)" \
+            "$IMAGE_REPOSITORY:22" -e '
+              const tls = require("node:tls");
+              const { createHash, X509Certificate } = require("node:crypto");
+              const sha = pem => createHash("sha256").update(new X509Certificate(pem).raw).digest("hex");
+              const pem = tls.getCACertificates("default").find(p => sha(p) === process.env.ROOT_SHA);
+              if (!pem) throw Error("target root not found");
+              console.log(new X509Certificate(pem).raw.toString("base64"));
+            ' > proof/canary/target.der.b64
+      - name: Exercise production observer with controlled Mozilla distrust
+        run: |
+          python3 scripts/ca-deployment-canary.py \
+            --der-b64-file proof/canary/target.der.b64 \
+            --base-22 proof/canary/base-22.json \
+            --base-24 proof/canary/base-24.json \
+            --main-sha "$GITHUB_SHA" --source-run "$GITHUB_RUN_ID" \
+            --output-dir proof/canary
+          test "$(cat proof/canary/target-hash.txt)" = \
+            "$(jq -r .excluded_cert_der_sha256 proof/canary/canary.json)"
+      - name: Commit synthetic exclusion on proof-only branch
+        run: |
+          branch="proof/ca-$GITHUB_RUN_ID"
+          git switch -c "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- certificates.auto.exclude proof/canary/
+          git commit -m "Canary: synthetic root distrust for proof run $GITHUB_RUN_ID"
+          git push origin "HEAD:refs/heads/$branch"
+          echo "PROOF_BRANCH=$branch" >> "$GITHUB_ENV"
+          {
+            echo '### Controlled distrust proof'
+            echo "Proof-only branch: $branch"
+            echo "Root fingerprint: $(cat proof/canary/target-hash.txt)"
+            echo 'Production main and stable tags remain unchanged.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch second GitHub Actions run automatically
+        run: |
+          gh workflow run ca-deployment-proof.yml --ref "$PROOF_BRANCH" \
+            -f phase=publish -f source_run="$GITHUB_RUN_ID"
+      - name: Wait for remote publication proof
+        run: |
+          child=''
+          for attempt in $(seq 1 30); do
+            child=$(gh run list --workflow ca-deployment-proof.yml \
+              --branch "$PROOF_BRANCH" --event workflow_dispatch \
+              --json databaseId --jq '.[0].databaseId // empty')
+            if [[ "$child" =~ ^[0-9]+$ ]]; then break; fi
+            sleep 5
+          done
+          [[ "$child" =~ ^[0-9]+$ ]] || { echo 'Dispatched workflow did not start'; exit 1; }
+          echo "Published canary run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$child"
+          gh run watch "$child" --exit-status
+          echo "Published and verified child run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$child" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    if: startsWith(github.ref, 'refs/heads/proof/ca-') && inputs.phase == 'publish'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        line: ['22', '24']
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      LINE: ${{ matrix.line }}
+      SOURCE_RUN: ${{ inputs.source_run }}
+      DOCKER_BUILD_SUMMARY: 'false'
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+    steps:
+      - name: Checkout synthetic distrust branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate proof-only source and prevent production tag mutation
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          [ "$GITHUB_REF" = "refs/heads/proof/ca-$SOURCE_RUN" ] || exit 1
+          jq -e --arg run "$SOURCE_RUN" \
+            '.test_only == true and .source_run == $run and .upstream_source == "synthetic fixture, not Mozilla production"' \
+            proof/canary/canary.json > /dev/null
+          fingerprint=$(jq -r .excluded_cert_der_sha256 proof/canary/canary.json)
+          grep -Fxq "$fingerprint" certificates.auto.exclude
+          echo "EXPECTED_HASH=$fingerprint" >> "$GITHUB_ENV"
+          echo "CANARY_TAG=ghcr.io/$GITHUB_REPOSITORY:ca-proof-$SOURCE_RUN-$LINE" >> "$GITHUB_ENV"
+          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
+      - name: Build using production-pinned Node and Debian inputs
+        id: lock
+        run: |
+          mkdir -p "$RUNNER_TEMP/work"
+          cp "state/$LINE/stable.lock" "$RUNNER_TEMP/work/canary.lock"
+          python3 scripts/lock.py set "$RUNNER_TEMP/work/canary.lock" \
+            "BUILD_DEFINITION_SHA256=$(python3 scripts/lock.py build-definition)" PUBLISHED_DIGEST=
+          python3 scripts/lock.py check "$RUNNER_TEMP/work/canary.lock" "$LINE"
+          {
+            echo 'build_args<<END_BUILD_ARGS'
+            python3 scripts/lock.py build-args "$RUNNER_TEMP/work/canary.lock"
+            echo END_BUILD_ARGS
+          } >> "$GITHUB_OUTPUT"
+      - name: Install pinned buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver: docker
+          cache-binary: false
+      - name: Reproduce image twice with isolated builders
+        id: build
+        run: |
+          KEEP_BUILDER=1 scripts/reproduce.sh "$RUNNER_TEMP/work/canary.lock" "$RUNNER_TEMP/work/out"
+          echo "digest=$(cat "$RUNNER_TEMP/work/out/digest")" >> "$GITHUB_OUTPUT"
+          echo "builder=$(cat "$RUNNER_TEMP/work/out/builder")" >> "$GITHUB_OUTPUT"
+          scripts/load-image.sh "$RUNNER_TEMP/work/out/a/image.tar" minimal-node-runtime:canary
+          scripts/smoke-test.sh minimal-node-runtime:canary \
+            "$(python3 scripts/lock.py get "$RUNNER_TEMP/work/canary.lock" NODE_VERSION)"
+      - name: Login for isolated GHCR publication
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish only a proof-specific registry tag
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          builder: ${{ steps.build.outputs.builder }}
+          context: .
+          file: Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          build-args: ${{ steps.lock.outputs.build_args }}
+          build-contexts: debs=${{ runner.temp }}/work/out/a/debs
+          tags: ${{ env.CANARY_TAG }}
+          outputs: type=image,push=true,rewrite-timestamp=true,oci-mediatypes=true
+      - name: Verify published digest and Node trust after a real GHCR pull
+        run: |
+          tested="${{ steps.build.outputs.digest }}"
+          pushed="${{ steps.push.outputs.digest }}"
+          [ "$tested" = "$pushed" ] || { echo "pushed != tested"; exit 1; }
+          remote=$(docker buildx imagetools inspect "$CANARY_TAG" --format '{{json .Manifest}}' | jq -r .digest)
+          [ "$remote" = "$tested" ] || { echo "registry != tested"; exit 1; }
+          docker pull "$CANARY_TAG"
+          docker run --rm --pull never "$CANARY_TAG" -e '
+            const tls = require("node:tls");
+            const { createHash, X509Certificate } = require("node:crypto");
+            const sha = pem => createHash("sha256").update(new X509Certificate(pem).raw).digest("hex");
+            console.log(JSON.stringify(tls.getCACertificates("default").map(sha).sort()));
+          ' > "$RUNNER_TEMP/observed-roots.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          baseline = set(json.loads(Path(f'proof/canary/base-{os.environ["LINE"]}.json').read_text()))
+          observed = set(json.loads((Path(os.environ['RUNNER_TEMP'])/'observed-roots.json').read_text()))
+          assert baseline - observed == {os.environ['EXPECTED_HASH']}, 'unexpected removed roots'
+          assert observed - baseline == set(), 'unexpected added roots'
+          print('PASS: GHCR-pulled Node image distrusts precisely the target root')
+          PY
+      - name: Sign and verify remote proof digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN -e GITHUB_ACTIONS \
+            -e HOME=/tmp -e DOCKER_CONFIG=/docker-config \
+            -v "$HOME/.docker:/docker-config:ro" \
+            "$COSIGN_IMAGE" sign --yes "$IMAGE_REPOSITORY@$DIGEST"
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e DOCKER_CONFIG=/docker-config \
+            -v "$HOME/.docker:/docker-config:ro" \
+            "$COSIGN_IMAGE" verify "$IMAGE_REPOSITORY@$DIGEST" \
+            --certificate-identity-regexp "^https://github\\.com/$GITHUB_REPOSITORY/\\.github/workflows/ca-deployment-proof\\.yml@refs/heads/proof/ca-$SOURCE_RUN$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+      - name: Record externally verifiable proof
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "Node $LINE GHCR distrust canary: $CANARY_TAG"
+            echo "Published and pulled: $DIGEST"
+            echo "Root excluded: $EXPECTED_HASH"
+            echo 'All other roots unchanged; registry signature verified.'
+            echo 'Stable and candidate tags were not modified.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean temporary builders
+        if: always()
+        run: |
+          for name in $(docker buildx ls --format '{{.Name}}' | grep '^mnr-' | sort -u); do
+            docker buildx rm --force "$name" >/dev/null 2>&1 || true
+          done
