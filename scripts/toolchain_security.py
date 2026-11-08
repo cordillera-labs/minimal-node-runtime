@@ -80,7 +80,8 @@ def direct_entries(tool, advisory):
     allowed = DIRECT_MODULES[tool]
     return [(entry, advisory) for entry in entries if isinstance(entry, dict)
             and isinstance(entry.get("package"), dict)
-            and entry["package"].get("ecosystem", "").lower() == "go"
+            and isinstance(entry["package"].get("ecosystem"), str)
+            and entry["package"]["ecosystem"].lower() == "go"
             and entry["package"].get("name") in allowed]
 
 
@@ -176,6 +177,11 @@ def github_list(url):
     result = json.loads(raw)
     if not isinstance(result, list):
         raise ValueError("GitHub did not return an array")
+    # Never certify a security upgrade from a possibly incomplete advisory
+    # inventory. GitHub's documented per_page=100 response is truncated if
+    # there are more; fail safely until explicit pagination is implemented.
+    if "security-advisories?" in url and len(result) >= 100:
+        raise ValueError("advisory inventory may be truncated at 100 entries")
     return result
 
 
