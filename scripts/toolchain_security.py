@@ -34,6 +34,8 @@ ORDER = ("buildkit", "buildx", "cosign", "trivy")
 GHSA = re.compile(r"^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$")
 VER = re.compile(r"^v?([0-9]+)\.([0-9]+)\.([0-9]+)$")
 BOUND = re.compile(r"^(>=|<=|>|<|=)\s*v?([0-9]+)\.([0-9]+)\.([0-9]+)$")
+CLOSED_RANGE = re.compile(r"^v?([0-9]+)\.([0-9]+)\.([0-9]+)\s+-\s+v?([0-9]+)\.([0-9]+)\.([0-9]+)$")
+CVE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 ADVISORIES_URL = "https://api.github.com/repos/{repo}/security-advisories?state=published&per_page=100"
 
@@ -50,6 +52,11 @@ def affected(v, specification):
     """
     if not isinstance(specification, str) or not specification.strip():
         return None
+    closed = CLOSED_RANGE.fullmatch(specification.strip())
+    if closed:
+        nums = tuple(map(int, closed.groups()))
+        lower, upper = nums[:3], nums[3:]
+        return lower <= v <= upper if lower <= upper else None
     tokens = specification.split(",")
     if len(tokens) > 8:
         return None
@@ -78,11 +85,26 @@ def direct_entries(tool, advisory):
     if not isinstance(entries, list):
         return []
     allowed = DIRECT_MODULES[tool]
-    return [(entry, advisory) for entry in entries if isinstance(entry, dict)
-            and isinstance(entry.get("package"), dict)
-            and isinstance(entry["package"].get("ecosystem"), str)
-            and entry["package"]["ecosystem"].lower() == "go"
-            and entry["package"].get("name") in allowed]
+    selected = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        package = entry.get("package")
+        if isinstance(package, dict):
+            ecosystem = package.get("ecosystem")
+            name = package.get("name")
+            if isinstance(ecosystem, str) and ecosystem.lower() == "go" and name in allowed:
+                selected.append((entry, advisory))
+                continue
+            # Some maintainers (including BuildKit and Buildx) publish their
+            # *product* CVEs without naming a Go module or other package.
+            # Only a published CVE in the tool's own repo with an explicitly
+            # untyped package can use this narrow product-level path.
+            if ecosystem == "other" and name in (None, "") and CVE.fullmatch(str(advisory.get("cve_id", ""))):
+                selected.append((entry, advisory))
+        elif package is None and CVE.fullmatch(str(advisory.get("cve_id", ""))):
+            selected.append((entry, advisory))
+    return selected
 
 
 def pick(tool, repo, pinned, releases, advisories):
@@ -115,6 +137,11 @@ def pick(tool, repo, pinned, releases, advisories):
         if patched is None:
             legacy = entry.get("first_patched_version")
             patched = legacy.get("identifier") if isinstance(legacy, dict) else None
+        if isinstance(patched, str) and patched.endswith("+"):
+            # GitHub's product-level advisories use vMAJOR.MINOR.PATCH+
+            # to mean that release and newer. A single terminal '+' is the
+            # only accepted suffix; never parse arbitrary version ranges.
+            patched = patched[:-1]
         fixed = version(patched)
         if fixed is None or fixed <= installed:
             raise ValueError(f"missing valid patched version for {advisory['ghsa_id']}")
