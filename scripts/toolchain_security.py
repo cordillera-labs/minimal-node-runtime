@@ -106,8 +106,15 @@ def pick(tool, repo, pinned, releases, advisories):
             raise ValueError(f"unparseable affected version range for {advisory['ghsa_id']}")
         if not match:
             continue
-        patched = entry.get("first_patched_version")
-        fixed = version(patched.get("identifier")) if isinstance(patched, dict) else None
+        # Repository advisory REST responses use patched_versions (a
+        # version string). The global GitHub advisory schema may instead
+        # provide first_patched_version: {identifier: ...}. Do not guess at
+        # multiple ranges or a version omitted from the authoritative feed.
+        patched = entry.get("patched_versions")
+        if patched is None:
+            legacy = entry.get("first_patched_version")
+            patched = legacy.get("identifier") if isinstance(legacy, dict) else None
+        fixed = version(patched)
         if fixed is None or fixed <= installed:
             raise ValueError(f"missing valid patched version for {advisory['ghsa_id']}")
         fixing.append((fixed, advisory["ghsa_id"], advisory.get("html_url", "")))
