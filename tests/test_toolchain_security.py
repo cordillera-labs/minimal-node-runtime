@@ -13,8 +13,8 @@ import toolchain_security as sec  # noqa: E402
 
 
 def release(v, date="2026-11-07T12:00:00Z", **other):
-    return dict(tag_name=v, published_at=date, html_url=f"https://example.test/{v}",
-                draft=False, prerelease=False, **other)
+    return {"tag_name":v, "published_at":date, "html_url":f"https://example.test/{v}",
+            "draft":False, "prerelease":False, **other}
 
 
 def advisory(tool, low, high, fixed, ghsa="GHSA-abcd-1234-efgh", **overrides):
