@@ -87,6 +87,7 @@ jobs:
           expected="CA distrust $GITHUB_RUN_ID"
           child=''
           for attempt in $(seq 1 36); do
+            echo "Waiting for correlated update run (poll $attempt)"
             child=$(gh run list --workflow update.yml --branch main \
               --event workflow_dispatch --limit 30 \
               --json databaseId,displayTitle \
