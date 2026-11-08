@@ -275,6 +275,8 @@ edits the issue body, which sends no notification.
 | `upstream-signature` | a Node.js signature or checksum does not verify | by a maintainer |
 | `unfixed-cve` | a HIGH or CRITICAL finding has no fixed version | the hourly scan of the published stable image no longer reports it |
 | `toolchain-update` | a tool pin has a stable upstream release past the cooldown | the pin reaches that release |
+| `toolchain-security-fault` | a tool's published advisory or release feed could not be read safely | a later observation successfully reads all tool feeds |
+| `toolchain-security-failure` | an automated GHSA-backed security PR, CI, merge or image dispatch fails | maintainer review / successful retry |
 | `candidate` | a breaking build is published to `<line>-candidate` | the candidate is promoted |
 | `breaking` | a breaking security fix is published to stable | by a maintainer |
 | `reproducibility` | the weekly rebuild gives another digest, or the registry does not serve it | a later weekly run succeeds |
@@ -287,25 +289,73 @@ compares each pin with the latest stable release of its tool on GitHub
 (`aquasecurity/trivy`, `moby/buildkit`, `docker/buildx`, `sigstore/cosign`).
 A draft, a prerelease and a tag that is not `vMAJOR.MINOR.PATCH` never count.
 
-A newer release is eligible when its GitHub release is `COOLDOWN_DAYS` old, the
-same cooldown as every other input. There is no security fast path, because a
-person reviews every change to the build definition. The cooldown also gives time
-to notice a compromised release: Trivy's own release pipeline was compromised
-earlier in 2026.
+A newer **nonsecurity** release is eligible when its GitHub release is
+`COOLDOWN_DAYS` old. The toolchain job opens one `toolchain-update` issue per
+eligible pin and never changes it. A person may review and adopt those updates.
 
-For each tool with an eligible release, the job opens one `toolchain-update`
-issue, titled `Toolchain pin update available: <tool>`. It edits the issue body
-on later runs and closes the issue when the pin reaches the eligible release.
-The job never edits `toolchain.env` and publishes nothing. A person reviews the
-release notes and merges a pull request that changes the pin; for an image pin the
-tag and the digest change together. Change the BuildKit and buildx pins on their
-own, because they can change the image digest.
+### Automatic, advisory-backed security fixes
+
+The independent `.github/workflows/toolchain-security.yml` runs hourly at
+minute 31 on `main` (and on manual dispatch). It uses
+`scripts/toolchain_security.py` to read **published security advisories from
+the upstream tool's own GitHub repository**, not merely the text of its release
+notes. The bypass applies only when:
+
+- The advisory names the **tool's own Go module** (not an unrelated dependency),
+  identifies the currently pinned version as vulnerable with a parseable
+  affected-version range, and provides a first patched version.
+- The target is a published, stable `vMAJOR.MINOR.PATCH` release in the **same
+  major**; the planner chooses the earliest such release that fixes **all**
+  applicable published direct advisories. It ignores drafts, prereleases and
+  unrecognized ranges. An unavailable API, missing patch, or malformed
+  advisory is **not** authorization for an upgrade.
+- For BuildKit and Cosign, the exact immutable digest of the official new
+  registry image is resolved and pinned alongside the tag. The registry digest
+  must be a valid SHA-256; a tag alone is never accepted.
+- Only one tool changes per iteration, in order: BuildKit, Buildx, Cosign,
+  Trivy. This isolates builder-related changes that might change image digests.
+
+For a qualifying security fix, the bot creates a **single-pin** pull request,
+explicitly dispatches the existing complete read-only `ci.yml` workflow on
+that PR's exact head commit (PRs created with `GITHUB_TOKEN` do not trigger
+the usual `pull_request` workflow), and **merges only if the full CI passes**
+on both Node lines, including reproducible double builds, lint, vulnerability
+gates, negative controls and the CA distrust integration test. It never uses
+`--admin` or bypasses branch protection. A failed CI or merge leaves the
+security PR open with an actionable `toolchain-security-failure` issue.
+After successful merge it explicitly dispatches the usual `update.yml`
+publication pipeline, because bot-authored commits do not trigger push-based
+workflows.
+
+The first adoption requires enabling the repository setting allowing GitHub
+Actions to **create pull requests**; ordinary write permissions and CI branch
+protection must also permit the intended merge. Without that, the bot will
+fail visibly and leave the current pinned versions unchanged.
+
+### Limits of the evidence
+
+A GHSA with a patched version is evidence that **a particular disclosed
+vulnerability is addressed**. It does not certify the release as generally
+safe or prove a compromise did not occur. In particular, Trivy's own release
+pipeline was compromised earlier in 2026. We therefore limit automatic
+updates to versioned advisories, signed-in registry access, pinned image
+digests, an auditable PR and the complete repository CI suite. Security
+fixes found **only** in dependencies or inferred solely from release notes
+remain manual. **Major upgrades** (such as Cosign 2 → 3) also stay manual.
+These restrictions trade some speed for supply-chain protection.
+
+For each nonsecurity tool with an eligible release, the existing hourly
+`toolchain-update` issue remains the manual-review queue. Image pins must
+always update tag and digest together; BuildKit and Buildx should never change
+in the same PR.
 
 When the GitHub lookup fails, or a pin cannot be read, the job reports a fault in
 the run summary and as an annotation, opens no issue and leaves the tool's issue
 as it was. A fault is not "no update". The job is independent of the lines, so a
 fault never delays or fails a publication. A key added to `toolchain.env` with no
 entry in `scripts/toolchain.py` is a fault, and a unit test fails on it.
+The independent security watcher additionally opens or updates an issue for
+advisory lookup faults, instead of treating those faults as no available fix.
 
 ## Keepalive
 
@@ -336,8 +386,10 @@ script applies the cooldown to those updates, so its result can differ.
 Every GitHub Action is pinned by commit SHA. Dependabot proposes Action updates
 monthly, with a 7-day cooldown, and never merges them. CI checks each pull
 request. Dependabot does not read `toolchain.env`; the toolchain job opens an
-issue when a pin is behind (see [Toolchain pins](#toolchain-pins)), and a person
-changes the pin in a pull request. The next update run rebuilds with it.
+issue when a pin is behind (see [Toolchain pins](#toolchain-pins)). Security
+fixes with verified direct GHSA fixed versions use the separate fully-gated
+automatic PR workflow; other updates still require manual review. A merged
+toolchain change dispatches the normal build and publication pipeline.
 
 CI also lints the workflows on every pull request (`scripts/workflow-lint.sh`):
 zizmor for security mistakes such as unpinned actions, template injection,
