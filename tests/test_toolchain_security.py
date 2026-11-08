@@ -24,7 +24,7 @@ def advisory(tool, low, high, fixed, ghsa="GHSA-abcd-1234-efgh", **overrides):
         "html_url": f"https://github.com/{tool}/security/advisories/{ghsa}",
         "vulnerabilities": [{"package": {"ecosystem": "go", "name": tool},
                              "vulnerable_version_range": f">= {low}, < {high}",
-                             "first_patched_version": {"identifier": fixed}}],
+                             "patched_versions": fixed}],
         **overrides,
     }
 
@@ -76,6 +76,14 @@ class Selection(unittest.TestCase):
         data=[advisory("golang.org/x/net","0.1.0","0.62.0","0.62.0")]
         self.assertIsNone(sec.pick("trivy","aquasecurity/trivy","v0.74.0",releases,data))
 
+    def test_global_advisory_format_is_supported_without_weakening_repo_format(self):
+        data=advisory("github.com/sigstore/cosign/v2","2.6.0","2.6.5","2.6.5")
+        entry=data["vulnerabilities"][0]
+        entry.pop("patched_versions")
+        entry["first_patched_version"]={"identifier":"2.6.5"}
+        target=sec.pick("cosign","sigstore/cosign","v2.6.1",[release("v2.6.5")],[data])
+        self.assertEqual(target["to"],"v2.6.5")
+
     def test_only_major_fix_requires_human_review(self):
         releases=[release("v3.1.4")]
         data=[advisory("github.com/sigstore/cosign/v2","2.6.0","3.0.0","3.0.0")]
@@ -97,7 +105,7 @@ class Selection(unittest.TestCase):
 
     def test_missing_fixed_version_blocks_automation(self):
         bad=advisory("github.com/moby/buildkit","0.20.0","0.34.2","0.34.2")
-        bad["vulnerabilities"][0]["first_patched_version"]=None
+        bad["vulnerabilities"][0]["patched_versions"]=None
         with self.assertRaisesRegex(ValueError,"patched version"):
             sec.pick("buildkit","moby/buildkit","v0.33.1",[release("v0.34.2")],[bad])
 
