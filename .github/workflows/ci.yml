@@ -6,6 +6,9 @@ name: ci
 
 on:
   pull_request:
+  # GITHUB_TOKEN-created security PRs do not trigger pull_request CI.
+  # The security updater dispatches this read-only suite explicitly on its branch.
+  workflow_dispatch:
 
 permissions: {}
 
