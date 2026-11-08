@@ -109,6 +109,7 @@ jobs:
         run: |
           child=''
           for attempt in $(seq 1 30); do
+            echo "Waiting for dispatched proof run (poll $attempt)"
             child=$(gh run list --workflow ca-deployment-proof.yml \
               --branch "$PROOF_BRANCH" --event workflow_dispatch \
               --json databaseId --jq '.[0].databaseId // empty')
@@ -152,9 +153,11 @@ jobs:
             proof/canary/canary.json > /dev/null
           fingerprint=$(jq -r .excluded_cert_der_sha256 proof/canary/canary.json)
           grep -Fxq "$fingerprint" certificates.auto.exclude
-          echo "EXPECTED_HASH=$fingerprint" >> "$GITHUB_ENV"
-          echo "CANARY_TAG=ghcr.io/$GITHUB_REPOSITORY:ca-proof-$SOURCE_RUN-$LINE" >> "$GITHUB_ENV"
-          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
+          {
+            echo "EXPECTED_HASH=$fingerprint"
+            echo "CANARY_TAG=ghcr.io/$GITHUB_REPOSITORY:ca-proof-$SOURCE_RUN-$LINE"
+            grep -E '^[A-Z_]+=' toolchain.env
+          } >> "$GITHUB_ENV"
       - name: Build using production-pinned Node and Debian inputs
         id: lock
         run: |
