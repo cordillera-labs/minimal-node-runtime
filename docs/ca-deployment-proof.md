@@ -11,6 +11,22 @@ That job uses `gh workflow run` to dispatch the same workflow's publication phas
 
 The child verifies that the remote registry digest equals the reproducibly built digest, **pulls each image from GHCR**, and checks Node's effective default trust lost exactly the chosen root and gained no roots. It signs the pushed image digest and verifies the signature against its proof-workflow identity. Both runs provide auditable logs and image digests. The proof-only branches and tags remain available for inspection until explicitly cleaned up.
 
+## Real-event production verification
+
+When an **actual** authoritative Mozilla TLS distrust transition is accepted by
+`root-trust.yml`, the workflow now dispatches `update.yml` with the root-trust
+run ID as a correlation input and waits for that exact workflow to complete.
+It then checks both Node stable locks were recorded by that update run, resolves
+each stable GHCR tag to the recorded digest, pulls the digests, and verifies the
+newly excluded DER SHA-256 fingerprints are **both baked into the images and
+absent from Node's default TLS root list**.
+
+A candidate-only publication, a failed image build, an unchanged stable tag, or
+a successful GitHub dispatch without a completed published image **fails the
+root-trust workflow** and opens the existing failure issue. This is a
+production verification step that will run on future genuine distrust events;
+it is not retroactive proof that such an event has already occurred.
+
 ## Evidence boundaries
 
 This is a safe canary **using synthetic Mozilla source data**. It tests the real observer's transition logic, commit, GitHub workflow dispatch, production Dockerfile, image rebuild, GHCR publication, remote pull, signing, and Node TLS enforcement. It does **not** claim that Mozilla has actually revoked the test CA, nor does it exercise the production stable-tag and GitHub release operations: those would be unsafe for a synthetic distrust event.
