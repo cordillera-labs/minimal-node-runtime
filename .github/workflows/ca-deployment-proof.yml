@@ -205,8 +205,16 @@ jobs:
           sbom: false
           build-args: ${{ steps.lock.outputs.build_args }}
           build-contexts: debs=${{ runner.temp }}/work/out/a/debs
-          tags: ${{ env.CANARY_TAG }}
-          outputs: type=image,push=true,rewrite-timestamp=true,oci-mediatypes=true
+          # Match the real publisher: push by untagged digest first.
+          outputs: type=image,name=${{ env.IMAGE_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true,oci-mediatypes=true
+      - name: Attach only a proof tag to the already-tested digest
+        env:
+          TESTED_DIGEST: ${{ steps.build.outputs.digest }}
+          PUSHED_DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          [ "$TESTED_DIGEST" = "$PUSHED_DIGEST" ] || { echo 'pushed digest differs'; exit 1; }
+          docker buildx imagetools create --prefer-index=false \
+            -t "$CANARY_TAG" "$IMAGE_REPOSITORY@$TESTED_DIGEST"
       - name: Verify published digest and Node trust after a real GHCR pull
         env:
           TESTED: ${{ steps.build.outputs.digest }}
