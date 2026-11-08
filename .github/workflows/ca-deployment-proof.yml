@@ -205,9 +205,12 @@ jobs:
           tags: ${{ env.CANARY_TAG }}
           outputs: type=image,push=true,rewrite-timestamp=true,oci-mediatypes=true
       - name: Verify published digest and Node trust after a real GHCR pull
+        env:
+          TESTED: ${{ steps.build.outputs.digest }}
+          PUSHED: ${{ steps.push.outputs.digest }}
         run: |
-          tested="${{ steps.build.outputs.digest }}"
-          pushed="${{ steps.push.outputs.digest }}"
+          tested="$TESTED"
+          pushed="$PUSHED"
           [ "$tested" = "$pushed" ] || { echo "pushed != tested"; exit 1; }
           remote=$(docker buildx imagetools inspect "$CANARY_TAG" --format '{{json .Manifest}}' | jq -r .digest)
           [ "$remote" = "$tested" ] || { echo "registry != tested"; exit 1; }
