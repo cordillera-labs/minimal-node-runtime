@@ -14,12 +14,18 @@
 # Events made with GITHUB_TOKEN start no workflow runs, so nothing here relies
 # on the record commits triggering anything.
 name: update
+run-name: ${{ inputs.distrust_run_id && format('CA distrust {0}', inputs.distrust_run_id) || 'Update' }}
 
 on:
   schedule:
     # Minute 17: GitHub documents the start of the hour as its peak load.
     - cron: '17 * * * *'
   workflow_dispatch:
+    inputs:
+      distrust_run_id:
+        description: Optional production root-trust run to correlate publication.
+        type: string
+        required: false
 
 permissions: {}
 

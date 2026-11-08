@@ -19,11 +19,12 @@ jobs:
   monitor:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 90
     permissions:
       contents: write
       issues: write
       actions: write
+      packages: read
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GH_TOKEN: ${{ github.token }}
@@ -76,8 +77,43 @@ jobs:
         run: |
           # workflow_dispatch is permitted from GITHUB_TOKEN even though
           # the bot's git push will not trigger push-based workflows.
-          gh workflow run update.yml --ref main
+          gh workflow run update.yml --ref main -f distrust_run_id="$GITHUB_RUN_ID"
           echo 'Dispatched image update workflow after accepted CA distrust.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require production update workflow to finish after distrust
+        id: publication
+        if: steps.record.outputs.overlay_changed == 'true'
+        run: |
+          expected="CA distrust $GITHUB_RUN_ID"
+          child=''
+          for attempt in $(seq 1 36); do
+            echo "Waiting for correlated update run (poll $attempt)"
+            child=$(gh run list --workflow update.yml --branch main \
+              --event workflow_dispatch --limit 30 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle == \"$expected\") | .databaseId" | head -1)
+            if [[ "$child" =~ ^[0-9]+$ ]]; then break; fi
+            sleep 5
+          done
+          [[ "$child" =~ ^[0-9]+$ ]] || { echo 'Update dispatch not observed'; exit 1; }
+          echo "Automatic update: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$child"
+          gh run watch "$child" --exit-status
+          echo "UPDATE_RUN_ID=$child" >> "$GITHUB_ENV"
+
+      - name: Login to GHCR for production distrust verification
+        if: steps.record.outputs.overlay_changed == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prove stable image publication and actual distrust
+        if: steps.record.outputs.overlay_changed == 'true'
+        run: |
+          bash scripts/verify-ca-publication.sh "$UPDATE_RUN_ID" "$RUNNER_TEMP/root-trust-report.json"
+          echo "Verified both stable GHCR tags and Node TLS exclusions: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$UPDATE_RUN_ID" \
+            >> "$GITHUB_STEP_SUMMARY"
 
       - name: Open source-specific review issues
         run: |
