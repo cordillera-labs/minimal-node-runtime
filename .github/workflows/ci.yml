@@ -101,7 +101,7 @@ jobs:
 
       - name: Build twice in fresh builders and compare
         run: |
-          scripts/reproduce.sh "$RUNNER_TEMP/work/ci.lock" "$RUNNER_TEMP/work/out"
+          KEEP_BUILDER=1 scripts/reproduce.sh "$RUNNER_TEMP/work/ci.lock" "$RUNNER_TEMP/work/out"
           scripts/load-image.sh "$RUNNER_TEMP/work/out/a/image.tar" minimal-node-runtime:build
           container=$(docker create minimal-node-runtime:build)
           docker export "$container" | tar -t > "$RUNNER_TEMP/work/listing.txt"
@@ -187,6 +187,13 @@ jobs:
           work="$RUNNER_TEMP/work"
           scripts/sbom-bundled.sh minimal-node-runtime:build "$work/sbom.trivy.cdx.json" "$work/ci.lock" \
             "$(cat "$work/out/digest")" "$work/sbom.cdx.json"
+
+      - name: Prove monitored CA distrust triggers a real image rebuild
+        run: |
+          # A synthetic Mozilla trust withdrawal is applied only inside this
+          # disposable PR checkout. Publishing and workflow dispatch are never invoked.
+          bash scripts/root-trust-integration.sh minimal-node-runtime:build \
+            "$RUNNER_TEMP/work/ci.lock" "$RUNNER_TEMP/work"
 
       - name: Remove the builders
         if: always()
