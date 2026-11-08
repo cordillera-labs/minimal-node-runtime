@@ -101,6 +101,20 @@ class Selection(unittest.TestCase):
         target=sec.pick("cosign","sigstore/cosign","v2.6.1",releases,entries)
         self.assertEqual(target["to"],"v2.6.5")
 
+    def test_cosign_two_module_ranges_do_not_cross_major_boundaries(self):
+        entry=advisory("github.com/sigstore/cosign/v2","2.0.0","2.6.5","v2.6.5")
+        entry["vulnerabilities"].append({
+            "package":{"ecosystem":"go","name":"github.com/sigstore/cosign/v3"},
+            "vulnerable_version_range":"<=3.1.2",
+            "patched_versions":"v3.1.3",
+        })
+        result=sec.pick("cosign","sigstore/cosign","v2.6.1",
+                        [release("v2.6.5"),release("v3.1.4")],[entry])
+        self.assertEqual(result["to"],"v2.6.5")
+        result3=sec.pick("cosign","sigstore/cosign","v3.1.2",
+                         [release("v3.1.3"),release("v3.1.4")],[entry])
+        self.assertEqual(result3["to"],"v3.1.3")
+
     def test_not_related_dependency_or_release_notes_claim(self):
         releases=[release("v0.76.2")]
         data=[advisory("golang.org/x/net","0.1.0","0.62.0","0.62.0")]
