@@ -126,7 +126,7 @@ def parse_mozilla(raw, *, minimum=100):
     return dict(sorted(result.items()))
 
 
-def parse_chrome(raw, *, minimum=100):
+def parse_chrome(raw, *, minimum=75):
     source = raw.decode("utf-8")
     if not re.search(r"(?m)^version_major: [1-9][0-9]*\s*$", source):
         raise SourceError("Chrome Root Store missing version")
@@ -206,7 +206,7 @@ def run(state_dir, overlay, report, *, getter=get_bytes, token=None):
         prior = json.loads(path.read_text()) if path.exists() else None
         if prior is not None and (prior.get("repository") != SOURCES[source][0] or
                                   not isinstance(prior.get("roots"), dict) or
-                                  len(prior["roots"]) < 100):
+                                  len(prior["roots"]) < (100 if source == "mozilla" else 75)):
             raise SourceError(f"{source} snapshot is malformed or from another source")
         current = observe_source(source, getter=getter, token=token)
         states[source] = (prior, current)

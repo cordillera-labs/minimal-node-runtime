@@ -98,6 +98,12 @@ class RootTrustMonitorTests(unittest.TestCase):
         with self.assertRaises(monitor.SourceError):
             monitor.parse_mozilla(nss(missing=range(10)))
 
+    def test_chrome_only_counts_trust_anchors_not_additional_certs(self):
+        raw = chrome(count=95) + ('\nadditional_certs {\n sha256_hex: "' + 'f'*64 + '"\n}\n').encode()
+        result = monitor.parse_chrome(raw)
+        self.assertEqual(len(result), 95)
+        self.assertNotIn('f'*64, result)
+
     def test_chrome_removal_and_constraints_are_review_only(self):
         old = {'roots': monitor.parse_chrome(chrome())}
         new = {'roots': monitor.parse_chrome(chrome(missing={104}, restrictions={103}))}
