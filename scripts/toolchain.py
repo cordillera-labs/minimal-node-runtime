@@ -150,8 +150,8 @@ def github_releases(repo):
         # silently missing updates (previously observed with Trivy).
         if not token or ("HTTP 403" not in str(exc) and "HTTP 401" not in str(exc)):
             raise
-        headers.pop("Authorization", None)
-        body = upstream.get(url, headers=headers)
+        public_headers = {key: value for key, value in headers.items() if key != "Authorization"}
+        body = upstream.get(url, headers=public_headers)
     releases = json.loads(body)
     if not isinstance(releases, list):
         raise ValueError("the response is not a list of releases")
