@@ -35,7 +35,8 @@ class Ranges(unittest.TestCase):
         self.assertFalse(sec.affected((0, 34, 2), ">= 0.26.0, < 0.34.2"))
         self.assertTrue(sec.affected((0, 34, 1), "> 0.34.0, <= 0.34.1"))
         self.assertTrue(sec.affected((2, 6, 5), "= 2.6.5"))
-        for bad in ("", "*", "^2.6", "<= v2.6.x", "<2.6.5; rm -rf ~", "2.6.5", None):
+        for bad in ("", "*", "^2.6", "<= v2.6.x", "<2.6.5; rm -rf ~", "2.6.5", None,
+                    "> 9.0.0, UNKNOWN"):
             self.assertIsNone(sec.affected((2, 6, 4), bad))
 
     def test_empty_unsupported_or_withdrawn_advisory_no_fast_path(self):
