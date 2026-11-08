@@ -59,7 +59,13 @@ does not stop another. For each line, these jobs run:
    `main`.
 5. **report**: opens, updates or closes the line's issues.
 
-Beside the lines, a **toolchain** job checks the pins in `toolchain.env`. See
+Beside the lines, a **toolchain** job checks the pins in `toolchain.env`.
+An independent hourly `root-trust.yml` observes Mozilla and Chrome program
+changes. Only explicit Mozilla website-trust withdrawals can append removal-only
+DER fingerprints to `certificates.auto.exclude`; that change to the build
+definition is eligible immediately and dispatches this normal update workflow.
+Chrome restrictions and ambiguous removals create review issues. See
+[external root trust](external-root-trust.md). See
 [Toolchain pins](#toolchain-pins).
 
 After every line, **keepalive** commits a heartbeat when `main` has been quiet.

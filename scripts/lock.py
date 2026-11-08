@@ -46,7 +46,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD_DEFINITION_FILES = (
     "Dockerfile", "packages.list", "certificates.exclude",
     "scripts/assemble-rootfs.sh", "scripts/select-ca-certificates.sh",
-    "runtime/ca-distrust.cjs", "toolchain.env",
+    "runtime/ca-distrust.cjs", "runtime/ca-image-filter.cjs",
+    "runtime/ca-preload.cjs", "certificates.auto.exclude", "toolchain.env",
 )
 
 SHA256 = r"[0-9a-f]{64}"

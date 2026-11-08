@@ -1,0 +1,118 @@
+# Independently monitor authoritative Mozilla and Chrome root programs.
+# Only an explicit, unconditional Mozilla website trust withdrawal may append
+# a DER fingerprint to certificates.auto.exclude. Other changes create issues.
+# This runs *outside* the minimal runtime image; it adds no runtime updater.
+name: root-trust
+
+on:
+  schedule:
+    - cron: '43 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: root-trust
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      actions: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Check out current repository state
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true # necessary for the state and overlay record push
+
+      - name: Observe pinned upstream root-store snapshots
+        run: |
+          python3 scripts/root_trust_monitor.py --report "$RUNNER_TEMP/root-trust-report.json"
+          {
+            echo '### External root-store observation'
+            jq -r '"- New automatic exclusions: \(.auto_excluded | length)"' "$RUNNER_TEMP/root-trust-report.json"
+            jq -r '"- Changes requiring review: \(.review | length)"' "$RUNNER_TEMP/root-trust-report.json"
+            jq -r '.sources | to_entries[] | "- \(.key): \(.value.commit), SHA-256 \(.value.source_sha256)"' "$RUNNER_TEMP/root-trust-report.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit accepted observations and removal-only policy
+        id: record
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add state/trust/ certificates.auto.exclude
+          if git diff --cached --quiet; then
+            echo 'no committed change'
+            echo 'overlay_changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --cached --name-only | grep -qx certificates.auto.exclude; then
+            echo 'overlay_changed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'overlay_changed=false' >> "$GITHUB_OUTPUT"
+          fi
+          git commit -m 'Record external CA trust observations and confirmed root distrust'
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push rejected, rebasing onto main ($attempt)"
+            git pull --rebase origin main
+          done
+          exit 1
+
+      - name: Rebuild images after accepted CA exclusions
+        if: steps.record.outputs.overlay_changed == 'true'
+        run: |
+          # workflow_dispatch is permitted from GITHUB_TOKEN even though
+          # the bot's git push will not trigger push-based workflows.
+          gh workflow run update.yml --ref main
+          echo 'Dispatched image update workflow after accepted CA distrust.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open source-specific review issues
+        run: |
+          jq -c '.review[]' "$RUNNER_TEMP/root-trust-report.json" | while IFS= read -r entry; do
+            source=$(jq -r .source <<< "$entry")
+            kind=$(jq -r .kind <<< "$entry")
+            fingerprint=$(jq -r .sha256 <<< "$entry")
+            title="Review $source CA $kind: $fingerprint"
+            body=$(mktemp)
+            {
+              echo "The external CA observer detected a change that **cannot safely be"
+              echo "translated into an unconditional root exclusion**."
+              echo
+              echo "- Source: $source"
+              echo "- Change: $kind"
+              echo "- DER SHA-256: \`$fingerprint\`"
+              echo "- Run: $RUN_URL"
+              echo
+              echo 'This was **not** automatically added to certificates.auto.exclude.'
+              echo 'Check program-specific restrictions and effective dates before'
+              echo 'deciding whether to add a manually reviewed exclusion.'
+            } > "$body"
+            scripts/issue.sh ensure root-trust-review "$title" "$body"
+          done
+          scripts/issue.sh close root-trust-failure \
+            'External CA observer failed' "A later run succeeded: $RUN_URL"
+
+      - name: Report source or publication faults
+        if: failure()
+        run: |
+          body=$(mktemp)
+          {
+            echo 'The root-store observation, record, or dispatch failed.'
+            echo 'No new exclusions should be treated as published until verified.'
+            echo
+            echo "Run: $RUN_URL"
+          } > "$body"
+          scripts/issue.sh ensure root-trust-failure 'External CA observer failed' "$body"
