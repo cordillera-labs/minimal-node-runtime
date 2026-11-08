@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -139,6 +140,23 @@ class Plan(unittest.TestCase):
         result=sec.plan(self.PINS,lambda repo:[release("v0.99.9")],adv)
         self.assertIsNone(result["selected"])
         self.assertTrue(any("buildkit" in fault and "403" in fault for fault in result["faults"]))
+
+
+class LiveFeedValidation(unittest.TestCase):
+    def test_public_403_fallback(self):
+        data=[release("v0.34.2")]
+        with patch.dict(os.environ, {"GH_TOKEN":"scoped-token"}):
+            with patch.object(sec.upstream, "get", side_effect=[
+                ConnectionError("HTTP 403"),json.dumps(data).encode()]) as get:
+                result=sec.github_list("https://api.github.com/repos/moby/buildkit/releases?per_page=50")
+        self.assertEqual(result, data)
+        self.assertIn("Authorization", get.call_args_list[0].kwargs["headers"])
+        self.assertNotIn("Authorization", get.call_args_list[1].kwargs["headers"])
+
+    def test_truncated_advisory_feed_fails_closed(self):
+        with patch.object(sec.upstream, "get", return_value=json.dumps([{}]*100).encode()):
+            with self.assertRaisesRegex(ValueError,"truncated"):
+                sec.github_list("https://api.github.com/repos/moby/buildkit/security-advisories?state=published&per_page=100")
 
 
 class Apply(unittest.TestCase):
