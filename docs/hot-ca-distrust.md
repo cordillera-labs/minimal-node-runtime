@@ -35,7 +35,6 @@ For example, with Docker and an operator-managed host directory:
 docker run --rm \
   --mount type=bind,src=/srv/mnr-ca,dst=/run/mnr-ca,readonly \
   -e MNR_CA_DISTRUST_FILE=/run/mnr-ca/policy.json \
-  -e NODE_OPTIONS=--require=/nodejs/lib/ca-distrust.cjs \
   ghcr.io/cordillera-labs/minimal-node-runtime:24 /app/server.js
 ```
 
@@ -45,9 +44,11 @@ a file in the directory with an atomic rename and the container will see the
 replacement. In Kubernetes, use a projected ConfigMap/Secret directory
 volume; avoid `subPath` mounts, which don't receive projected updates.
 
-The JavaScript preload is shipped as `/nodejs/lib/ca-distrust.cjs`. Without
-`NODE_OPTIONS=--require=...` and `MNR_CA_DISTRUST_FILE`, nothing is
-enabled and the image's existing Node CA behavior remains unchanged. This
+The image preloads `/nodejs/lib/ca-preload.cjs` automatically. It first applies
+baked-in exclusions and then activates the live watcher when
+`MNR_CA_DISTRUST_FILE` is set. Without the latter, no live polling runs.
+When overriding `NODE_OPTIONS`, retain the image preload to preserve static
+and live exclusions. This
 preload works with both supported Node 22 and Node 24 lines.
 
 ## Update semantics

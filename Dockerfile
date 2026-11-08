@@ -51,6 +51,9 @@ COPY scripts/assemble-rootfs.sh /in/assemble-rootfs.sh
 COPY scripts/select-ca-certificates.sh /in/select-ca-certificates.sh
 COPY runtime/ca-distrust.cjs /in/ca-distrust.cjs
 COPY certificates.exclude /in/certificates.exclude
+COPY certificates.auto.exclude /in/certificates.auto.exclude
+COPY runtime/ca-image-filter.cjs /in/ca-image-filter.cjs
+COPY runtime/ca-preload.cjs /in/ca-preload.cjs
 RUN NODE_VERSION="${NODE_VERSION}" SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
     bash /in/assemble-rootfs.sh /in /rootfs /out
 
@@ -67,7 +70,8 @@ LABEL org.opencontainers.image.title="minimal-node-runtime" \
       org.opencontainers.image.source="https://github.com/cordillera-labs/minimal-node-runtime" \
       org.opencontainers.image.version="${NODE_VERSION}"
 ENV PATH=/nodejs/bin \
-    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_OPTIONS=--require=/nodejs/lib/ca-preload.cjs
 USER 65532:65532
 WORKDIR /home/nonroot
 ENTRYPOINT ["/nodejs/bin/node"]

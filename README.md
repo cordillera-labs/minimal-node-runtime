@@ -35,10 +35,13 @@ system zlib (`zlib1g`). Node.js carries its own copies of zlib, OpenSSL, ICU and
 other libraries inside the binary.
 
 The CA bundle is generated deterministically from the pinned Debian roots.
-`certificates.exclude` can remove individual package roots, with invalid
-entries failing the build. Node itself uses bundled Mozilla roots by default;
-to enforce exclusions for Node TLS clients, use
-`NODE_OPTIONS=--use-openssl-ca` to select the image's `SSL_CERT_FILE` store.
+Reviewed `certificates.exclude` paths and the automated, removal-only
+`certificates.auto.exclude` fingerprints both remove CAs from new images.
+The default `NODE_OPTIONS` preload also removes those roots from Node's
+embedded trust store, even when `--use-openssl-ca` is not specified.
+If you override `NODE_OPTIONS` downstream, preserve
+`--require=/nodejs/lib/ca-preload.cjs` to keep this policy enforced.
+See [external root monitoring](docs/external-root-trust.md).
 See [certificate selection](docs/contents.md#runtime-configuration).
 
 A separate, optional [live CA distrust feature](docs/hot-ca-distrust.md)

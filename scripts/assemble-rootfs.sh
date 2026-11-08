@@ -102,6 +102,10 @@ install -D -m 0755 "$stage/node/bin/node" "$root/nodejs/bin/node"
 install -D -m 0644 "$stage/node/LICENSE" "$root/nodejs/LICENSE"
 generated node nodejs/bin/node
 generated node nodejs/LICENSE
+install -D -m 0644 "$in_dir/ca-image-filter.cjs" "$root/nodejs/lib/ca-image-filter.cjs"
+install -D -m 0644 "$in_dir/ca-preload.cjs" "$root/nodejs/lib/ca-preload.cjs"
+generated node nodejs/lib/ca-image-filter.cjs
+generated node nodejs/lib/ca-preload.cjs
 install -D -m 0644 "$in_dir/ca-distrust.cjs" "$root/nodejs/lib/ca-distrust.cjs"
 generated node nodejs/lib/ca-distrust.cjs
 
@@ -165,7 +169,9 @@ mkdir -p "$root/etc/ssl/certs"
 bundle="$root/etc/ssl/certs/ca-certificates.crt"
 bash "$in_dir/select-ca-certificates.sh" \
     "$stage/pkg/ca-certificates/usr/share/ca-certificates" \
-    "$in_dir/certificates.exclude" "$bundle"
+    "$in_dir/certificates.exclude" "$bundle" \
+    "$in_dir/certificates.auto.exclude" "$root/nodejs/lib/ca-image-exclusions.txt"
+generated node nodejs/lib/ca-image-exclusions.txt
 cert_count=$(grep -c 'BEGIN CERTIFICATE' "$bundle")
 [ "$cert_count" -ge 100 ] || fail "the CA bundle holds only $cert_count certificates"
 chmod 0644 "$bundle"

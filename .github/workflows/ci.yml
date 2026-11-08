@@ -27,6 +27,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -v
           node --test tests/ca-distrust.test.cjs
+          node --test tests/ca-image-filter.test.cjs
           shellcheck scripts/*.sh
 
       - name: List the lines

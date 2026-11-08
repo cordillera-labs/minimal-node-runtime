@@ -1,5 +1,7 @@
 """Deterministic CA selection from the extracted Debian ca-certificates tree."""
 
+import base64
+import hashlib
 import pathlib
 import subprocess
 import tempfile
@@ -9,7 +11,8 @@ SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "select-ca-ce
 
 
 def certificate(name, newline=True):
-    return (f"-----BEGIN CERTIFICATE-----\n{name}\n-----END CERTIFICATE-----"
+    payload = base64.b64encode(name.encode()).decode()
+    return (f"-----BEGIN CERTIFICATE-----\n{payload}\n-----END CERTIFICATE-----"
             + ("\n" if newline else "")).encode()
 
 
@@ -23,6 +26,9 @@ class CertificateSelection(unittest.TestCase):
         self.exclusions = self.root / "certificates.exclude"
         self.exclusions.write_text("# No exclusions by default\n", encoding="utf-8")
         self.bundle = self.root / "bundle.crt"
+        self.auto = self.root / "certificates.auto.exclude"
+        self.auto.write_text("# empty\n", encoding="ascii")
+        self.denied = self.root / "denied.txt"
         self.put("mozilla/B.crt", certificate("B", newline=False))
         self.put("mozilla/A.crt", certificate("A"))
         self.put("mozilla/C.crt", certificate("C"))
@@ -36,7 +42,8 @@ class CertificateSelection(unittest.TestCase):
         if config is not None:
             self.exclusions.write_text(config, encoding="utf-8")
         return subprocess.run(["bash", str(SCRIPT), str(self.certs), str(self.exclusions),
-                               str(self.bundle)], capture_output=True, text=True, check=False)
+                               str(self.bundle), str(self.auto), str(self.denied)],
+                              capture_output=True, text=True, check=False)
 
     def test_default_selects_all_in_deterministic_order(self):
         result = self.select()
@@ -72,6 +79,26 @@ class CertificateSelection(unittest.TestCase):
         result = self.select()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not one PEM certificate", result.stderr)
+
+    def test_automatic_fingerprint_excludes_bundled_and_system_cas(self):
+        digest = hashlib.sha256(b"B").hexdigest()
+        self.auto.write_text(digest + "\n")
+        result = self.select()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.bundle.read_bytes(), certificate("A") + certificate("C"))
+        self.assertEqual(self.denied.read_text().splitlines(), [digest])
+
+    def test_manual_exclusions_are_also_emitted_for_node_preload(self):
+        result = self.select("mozilla/B.crt\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.denied.read_text().splitlines(), [hashlib.sha256(b"B").hexdigest()])
+
+    def test_invalid_auto_fingerprint_rejected(self):
+        for bad in ("BAD\n", "a"*64+"\n"+"a"*64+"\n", "B"*64+"\n"):
+            with self.subTest(bad=bad):
+                self.auto.write_text(bad)
+                result = self.select()
+                self.assertNotEqual(result.returncode, 0)
 
     def test_exclusion_config_is_required(self):
         self.exclusions.unlink()
