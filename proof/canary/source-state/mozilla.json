@@ -1,0 +1,427 @@
+{
+  "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "repository": "mozilla-firefox/firefox",
+  "roots": {
+    "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05": {
+      "distrust_after": "",
+      "status": "explicitly-untrusted"
+    },
+    "0369a82c1edf714587aa8d375eb456056556e479ef9e03a0a60590db3d334a0c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "05c60aae245651aa4f952b48e5307bc7960dc7c516a9f7138349237727290ce3": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "06bb429281912bb85ba2de66981fa360afc759e40a9b2e29c2681ae9866ebc77": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "082af87619ac0a493c0cc3dbb56a250261a15e9d45f6cdb9540828e49965b990": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "08464f0596b3c40765c4324d06becbabd50dcc0cc76a897a5593e9332c6aea54": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "0b9f6b75bb9067ac06ad6969b501c122a6337f2f264faf115333dc34c7120769": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "0caf33e517adfc1664a3f23f3e14df1547030ba120f1c04cb71baff0b641cc1b": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "0fc2fc59fcf1ee6060e48cd1ba571fd36cc630f0a199f7b2967f2ad63a8e6a68": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "1548a1178362e7cf2af4a651cc0bd74616e2ef7f946eaf36538743c54625274f": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "1694e9e8b0fe534577f0e66c7f3bcbda4b005a4a17b78b50b8ee19901dcd6c14": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "16a5a010e9fea178035989a606b519ce72ef96c0ba4681b4b5ccba3be231908c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "172410934308037ecd0bda4994827bf497e50bf82cb0cb14cd4acc3b1bce930e": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "1d28ba699dea48f141a417f89fe64f9ac3ea859eeaa49e41c80ae34c184e2d59": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "1e3c0990b8826bba0842f68355976b1e13e37c49e4f6d5cafc883953a0d6091f": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "1ecec0a8c79e2d0c0e879ba7d5b00ed5bb215700256ebb3642ebb75e7168c652": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "20990d22757358bba39396e3d20f95fcb24a10ab3b76c40cecdb93a9515df568": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "23046d0d82e53a8ff0c6bbcf6eee8a1e4f93b49592be17d5f5f66e5ae238a809": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "235f5725616ced08bce1a2ad931f4c9c67f00570512ee73fbdb8df321b0fa822": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "239b170b2f6348e23b208862023819b1efaf8e906a4d27d5c0c07b4ac8d56be9": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "243f156707eda59e19aac725581a0db2e07fe7a9cfcda12bbed1c086c22e393c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "25598c38b4e058cb125642e0985730462453013062edb6e437665e1ebc972f47": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "25e98a8985ab7c15a9e4ba1937b5c373f50e785077e968c67b6b44aa329b025f": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "280bc9bd12ec5f7849dc4ecedd454657b324ead619477231a3dc2efa269389d9": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "29b65e8a30a99e91c955d79d2c1313a23595278b7ad2e3244a1fe9072edd7439": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "2bd85334a138b8951e51611189c52ad126d409b0d25bfd0b381c736e261c42f0": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "3a5fbd63e2373ce6ed6001f0b4fa8a7f16e69c23663fde827b28d3e99f613837": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "3c764b053337639bc1e48fb79d6274026c39d0fa4687470209a881e5b4fca9a1": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "3c92670810228c9ae4cc668f513c4d88c64be7afcdc5f4153497a648ce04727a": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "3e81f499d1b2f83c1b9101e06e0a5a17f4474437cb837779d499173afced286e": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "425edb96b6f345a2df83360f41e5a847b2c8f6521be54e9a13f89512adeb03fa": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "4e31014ec379dee20e40bc2283c540b7c39e6a9bc78baf2d75ffea600cfe4003": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "50970b5e5cda5a212ba3113a9fd36c02ff22dc1e08721528c4bb3e21f1100536": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "5309c6694753226ab9f329ed64d8f6504f9f04aba1ca6ce668a5b84e3284ec54": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "5ad56c721c3fea4cdf512e8add39e56dc14dfa0dd979b2368760896706cd97bb": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "610d9111cab725291468c12e9e7a9c448afa2b566b071f9aad194554faddc0c7": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "615da4013b59e43b00a0d967a821baeaed9b28d0a4349af6979d3e785e7ba612": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "66b3ec85b34866b0546cb3f65a45bb389f32b801a58e982f829dc23bdb1e5d95": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "6c9d0946ff22bee55d615aaa34cdabd46924ea4ca593ca877a2d80d1db9f1c7c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "70795eb7b0afe50b2c224b1fa2a0c481d0f66d18242088643776d9510389202d": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "728dd4c308d900c23d8c3e69e4968902b12890e9b03e4459839f5267386011bb": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "78a20666f63eb95fd36da48eaea524333e212f12ade6c03d7de13146a1bdda25": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "79855013812d6fb1fc81d1a9d58ec48c043e5dbc18942052784ed96d32d4b139": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "7bf5a7ccbaa7ad34b7625587c4d47362a366ab7bde27b0c8920076fbfeea3a3a": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "7cd2055790692206d4888269612f4942d718c4393cc7035edd9e309e1df09d53": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "81df74b9509093a4344360f6dc1b0e236659da354bbb7c62e915e9f1d05641bf": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "8238e633d6cdc30d58fefaae292b624796d2bdab29625a138620b727d691a98b": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "849f453c3cec953628904a95edc3fd981a4426fdf7ec77890c1a8c9df6a13515": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "86903453b730441313270f808ac933401e36e6c20da1616b901c2256ed03184c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "896d2c9f854d7624be8f3906203baddd51ade73bc77c1a982da9349d09b3f452": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "8b509a68635d80ef7f8fe23ed26fe9333e90ed68198435e18c46b7185b9b5e02": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "8c06d6e15f2d30b770a8f07b04aa048ef768074dbddf81129ff99bfc11e99613": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "8da29e687d61b6d41f4c8ccd9f744d061339893f84336a7dc158ee29c362f05a": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "8de4a036df6326904611152375dc3f51b13f3e490681803b51c01b8ef4a08005": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "8e89768497cdea4ade9035abefb47270395346e761676dd5345bfe5796c1fa7f": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "8ea680716131337a4bbb3a5e1b2a52eb06bae0ed76564bc5aec21e6336e23de6": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "9123c504246d0edfe0482ecc4d69449505b20a63c16499a98b61f98a904af2d4": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "9160d73fcbf03489db3fc3e82a7239cf5cafb2df009eea448cab59d9ebe27447": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "939aa6ad2db8b57ed093e0602ce4d0ccf2ad35b25816e1b03d3a79c4c5ecab1e": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "9482d243c753cb555ef36e138bb2ec1a6661f0bc809a48b971f63396c4640659": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "953343716c60070dfe5c35cb2c345c5e250bdd598233dca8687c81f0e0c8c2f8": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "95df98178b521af8a432791269592cea9ddb65f2315035300ac0082887e115e1": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "9873568d49ddc1e694c3377179225a48c8d3d135f105083bc15270323162fff9": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "99ef22088f3c572861e86dc25123d2fc54911309737b98b67eafa2595952ec43": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "9b69f76433af08f1c01270ef2eec7cfabc6c585d4870932574579feb8ca8d20c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "9d5cefbe4090003814f694741c31cbe6313562b640e049420f0bcc5e96904c68": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "9e6d63dd931440850dd18acc4298e017d2a8649f57554e62aa20a8bd8ed3fded": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "a0cc5e69de8c1f4f9d33c0a761f1c84043f0236fdec1de29cdacedaa44b0a939": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "a4527baab5b06a217994e54e629ca105b56a4937e665c3bd4b3b067e1b974085": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "a69408bf5dd2bfe8912ec049be524940e48dc9b7f35741da113d5895e7b6e34e": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "a7745d8c199b4ca4f698b333fb745b0278375088fb67c2474db4872a6305835f": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "a7c8c2353802abf0ac7832aa19da50d27d02f41cb3c152cdba0836c10f14b4de": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "a9b57dd7be08770f5d8a398e791520849fb795cadd79646d98ce6572cc3ae5cf": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "aaf2a666784fd6000376d738a961b09c5a6325fb8194f3632af9836096f3b651": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "ab1360e549879a3fa227b6ba1cd4db74b094c423be230df9c62d92762e882960": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "acc31b42cb342316eff2fbaa8491dd50eed8d61c29ecf2c400f37044ad12df69": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "af168fc475dd3ebe0f8a2cbfc3dfbfc8b378b630fc7ca58d8220fb3626f5640c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "af58af9a139ac5c5439b72aa58284d5dec777569cf252762e263b91cd6f05a76": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "b5476eac45564fb061f5173476937ac5fea1c57a5302a497f5c7789189ee493c": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "b872b24f7185552252d65f2df36a987c570b66f372d7a8ff4cd83d0f2d574396": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "b8a021959d0e1aa42aab72fba9ec2396c1ef24352bc635c2d3676deb4386f194": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "bac55deeadf475609370fa101acf92be6d3b6c68f24d54521a1714f782364829": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "bf0002d132cc2a78b9fe64f5ff5957d79edc6188452d0b921336afcd941c5ee2": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "c0c26d2441bbe3d42bd1e73d6437441f6b9a4c8100489d57cd97349f0d5d2711": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "c141e3dade845814c8bad9fe64040caf4ed7335fd0e0bf1ebfaaade6651d9210": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "c52e69b55346b89eb91ba69bb233edd901f2940d10db2ae62b899f102e590dba": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "cb124a8fa92079f7233d4bb64830cec29e9c4f39b492fa79ce4dc69c4bfe2de3": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "cbff2c51f23ee922d05f9e04374d97a98847e4afc1df825dae552c03324c4c5a": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "d3d213bed0ad91a608d5d468681d633bc2f5133d5ac9b4734a390b6a861b8442": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "d5cb083452dd8a7a8a42febeeb2554293a6d9b01401e628bc14b8e4650f58042": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "da6d60b471ed14d45158a0424f283f29cef6529b80e5b7a4a0c11a7761874419": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "e20537ddf1d4cd0381017ff386c38c6ad6e175a8c4d95c4655b22ba1fc44d050": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "e2daa9a6834569c599b8d262d3ac6d546fe8047904178e8e77bb5a42a210c1be": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "e380dbc8f9ad87fee11e8c5a19527b40751f2cb39b9381c46ff3e0c7f1acc61f": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "e4f371c863f0a1a59ed666fb126689e5cd15b3dd313d08b878b0bcba5906509d": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "e82f81ea2296ba806e6fe2ff6ab44023ef1dd7c8dd9378b7610677b63eaf11ed": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "e957fb81f368c77ac8f7a0b09a3edcc4416b635d425423a6174691b3b12b197a": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "eb5cf9e59126fa704441c7714520d5665a49345da867cd37c06d9206143edef1": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "ec6550ad39478bffe01e653f9b09191c577f728c0f00be1c20b1e40938f6f52b": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "f1d35e29e704ee025768aa9d795ee14f857929aeb695b211292224fe5c602880": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "f4d8ed905aa0ff15fe430d55c4e0cb2c6b1ce68e4fd806912309dc6a4b241d06": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "f69cf5b6db99e91a91686f7d461c3f4c2d555a353b8f3d581391140fcc02dce7": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "f72302cd587b43aac1a712ef1d6466c20af275e9c2e19766bc1cb5c61d1d3998": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "fc206638edbf4328c593cdfadc2bb2d8c8126c60eb09b5fa3220161b4af11f5e": {
+      "distrust_after": "",
+      "status": "trusted"
+    },
+    "fd773f6b1b7d1b24391e1162b597cbe4a927497579213d99393a9b4d4ac44ba4": {
+      "distrust_after": "",
+      "status": "trusted"
+    }
+  },
+  "source_sha256": "ed92aab8d343640e99d4d7092305d57ece7537ab614ea4ba6d5a937d59da7e46"
+}

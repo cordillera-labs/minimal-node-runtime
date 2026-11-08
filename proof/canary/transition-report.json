@@ -1,0 +1,18 @@
+{
+  "auto_excluded": [
+    "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05"
+  ],
+  "review": [],
+  "sources": {
+    "chrome": {
+      "commit": "cccccccccccccccccccccccccccccccccccccccc",
+      "repository": "chromium/chromium",
+      "source_sha256": "66fe0a84798de4e3ebef2628bef61fc8d6920b9d30911d96c641b4a6dd676c43"
+    },
+    "mozilla": {
+      "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "repository": "mozilla-firefox/firefox",
+      "source_sha256": "ed92aab8d343640e99d4d7092305d57ece7537ab614ea4ba6d5a937d59da7e46"
+    }
+  }
+}

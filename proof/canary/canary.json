@@ -1,0 +1,12 @@
+{
+  "baseline_node_roots": [
+    "base-22.json",
+    "base-24.json"
+  ],
+  "excluded_cert_der_sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05",
+  "reason": "synthetic Mozilla explicit TLS distrust; test-only branch and registry tags",
+  "source_main_commit": "0e4be532703c3963064963d54c9feab95b0ecf32",
+  "source_run": "42529621729",
+  "test_only": true,
+  "upstream_source": "synthetic fixture, not Mozilla production"
+}
