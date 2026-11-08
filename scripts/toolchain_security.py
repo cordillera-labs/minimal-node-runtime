@@ -74,7 +74,7 @@ def affected(v, specification):
                 "<=": v <= bound, "=": v == bound}[op] for op, bound in parsed)
 
 
-def direct_entries(tool, advisory):
+def direct_entries(tool, advisory, installed_major):
     if not isinstance(advisory, dict) or advisory.get("state") != "published":
         return []
     if advisory.get("withdrawn_at") or not advisory.get("published_at"):
@@ -94,6 +94,14 @@ def direct_entries(tool, advisory):
             ecosystem = package.get("ecosystem")
             name = package.get("name")
             if isinstance(ecosystem, str) and ecosystem.lower() == "go" and name in allowed:
+                # The same Cosign GHSA may list distinct module ranges for
+                # v2 and v3. A v3 entry such as <= 3.1.2 must not be
+                # incorrectly applied to a pinned v2.6.1 binary.
+                if tool == "cosign":
+                    if name.endswith("/v2") and installed_major != 2:
+                        continue
+                    if name.endswith("/v3") and installed_major != 3:
+                        continue
                 selected.append((entry, advisory))
                 continue
             # Some maintainers (including BuildKit and Buildx) publish their
@@ -121,7 +129,7 @@ def pick(tool, repo, pinned, releases, advisories):
         raise ValueError("upstream security metadata is not a list")
     all_entries = []
     for advisory in advisories:
-        all_entries.extend(direct_entries(tool, advisory))
+        all_entries.extend(direct_entries(tool, advisory, installed[0]))
     fixing = []
     for entry, advisory in all_entries:
         match = affected(installed, entry.get("vulnerable_version_range"))
