@@ -131,7 +131,12 @@ to remove trusted roots for new TLS connections without an image rebuild.
 It is not a package updater, doesn't add CAs, and has no network access.
 See [live CA distrust](hot-ca-distrust.md) for activation and limitations.
 
-**Node.js trust semantics:** Node uses its **bundled** Mozilla roots by default,
+**Node.js trust semantics:** Node normally uses its **bundled** Mozilla roots by default,
+but this image preloads a removal-only filter for the selected manual and automatic
+exclusions. The original base trust set remains unchanged when there are no
+exclusions. See [external monitoring](external-root-trust.md).
+
+Without that preload, Node uses its **bundled** Mozilla roots by default,
 not this system bundle. The smoke test checks that
 `tls.getCACertificates('system')` returns the certificates in the bundle.
 To **enforce an exclusion** for Node's default HTTPS/fetch clients, start
