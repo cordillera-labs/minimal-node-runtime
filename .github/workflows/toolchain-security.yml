@@ -21,6 +21,7 @@ jobs:
     permissions:
       contents: write
       actions: write
+      packages: read
       pull-requests: write
       issues: write
     env:
@@ -102,6 +103,19 @@ jobs:
           if [[ -n "$digest" ]]; then args=(--digest "$digest"); fi
           python3 scripts/toolchain_security.py apply \
             --plan "$plan" --toolchain toolchain.env "${args[@]}"
+          if [[ "$tool" = cosign ]]; then
+            # CI does not sign images. Validate the new Cosign binary against
+            # a real existing stable production signature *before* merging.
+            echo "$GH_TOKEN" | docker login ghcr.io \
+              --username "$GITHUB_ACTOR" --password-stdin > /dev/null
+            image_repository=$(sed -n 's/^IMAGE_REPOSITORY=//p' toolchain.env)
+            known_digest=$(python3 scripts/lock.py get state/22/stable.lock PUBLISHED_DIGEST)
+            [[ "$known_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+            COSIGN_IMAGE="$(sed -n 's/^COSIGN_IMAGE=//p' toolchain.env)" \
+              scripts/verify-published.sh signature "$image_repository@$known_digest"
+            echo 'Upgraded Cosign verified the existing stable image signature.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
           [ "$(git diff --name-only)" = toolchain.env ] || { echo 'More than one changed file'; exit 1; }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
