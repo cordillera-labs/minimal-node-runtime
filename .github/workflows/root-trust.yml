@@ -110,7 +110,7 @@ jobs:
       - name: Prove stable image publication and actual distrust
         if: steps.record.outputs.overlay_changed == 'true'
         run: |
-          scripts/verify-ca-publication.sh "$UPDATE_RUN_ID" "$RUNNER_TEMP/root-trust-report.json"
+          bash scripts/verify-ca-publication.sh "$UPDATE_RUN_ID" "$RUNNER_TEMP/root-trust-report.json"
           echo "Verified both stable GHCR tags and Node TLS exclusions: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$UPDATE_RUN_ID" \
             >> "$GITHUB_STEP_SUMMARY"
 
