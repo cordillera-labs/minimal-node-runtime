@@ -301,9 +301,12 @@ minute 31 on `main` (and on manual dispatch). It uses
 the upstream tool's own GitHub repository**, not merely the text of its release
 notes. The bypass applies only when:
 
-- The advisory names the **tool's own Go module** (not an unrelated dependency),
-  identifies the currently pinned version as vulnerable with a parseable
-  affected-version range, and provides a first patched version.
+- The advisory identifies the currently pinned version as vulnerable
+  with a parseable affected-version range and provides a patched version.
+  It must name **the tool's own Go module**, not an unrelated dependency, OR
+  be a **published CVE** from the tool's own repository with an explicitly
+  untyped/no-package product-level advisory (as BuildKit and Buildx use).
+  Unnamed advisories without a CVE are never automatic.
 - The target is a published, stable `vMAJOR.MINOR.PATCH` release in the **same
   major**; the planner chooses the earliest such release that fixes **all**
   applicable published direct advisories. It ignores drafts, prereleases and
@@ -338,8 +341,10 @@ A GHSA with a patched version is evidence that **a particular disclosed
 vulnerability is addressed**. It does not certify the release as generally
 safe or prove a compromise did not occur. In particular, Trivy's own release
 pipeline was compromised earlier in 2026. We therefore limit automatic
-updates to versioned advisories, signed-in registry access, pinned image
-digests, an auditable PR and the complete repository CI suite. Security
+updates to versioned, published upstream advisories, authenticated registry
+digest lookups, pinned image digests, an auditable PR and the complete repository
+CI suite. The new Cosign binary must additionally verify the keyless signature
+of an existing stable image before the bot proposes its PR. Security
 fixes found **only** in dependencies or inferred solely from release notes
 remain manual. **Major upgrades** (such as Cosign 2 → 3) also stay manual.
 These restrictions trade some speed for supply-chain protection.
