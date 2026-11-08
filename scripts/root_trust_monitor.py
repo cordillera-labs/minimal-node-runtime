@@ -44,8 +44,8 @@ def get_bytes(url, *, limit=MAX_FETCH, token=None):
 
 def observe_source(name, getter=get_bytes, token=None):
     owner, branch, path = SOURCES[name]
-    commit = json.loads(getter(f"https://api.github.com/repos/{owner}/commits/{branch}", token=token))
-    sha = commit.get("sha", "")
+    ref = json.loads(getter(f"https://api.github.com/repos/{owner}/git/ref/heads/{branch}", token=token))
+    sha = ref.get("object", {}).get("sha", "")
     if not re.fullmatch(r"[a-f0-9]{40}", sha):
         raise SourceError(f"{name}: invalid upstream commit SHA")
     url = f"https://raw.githubusercontent.com/{owner}/{sha}/{path}"
@@ -58,7 +58,7 @@ def observe_source(name, getter=get_bytes, token=None):
 
 
 def objects(data):
-    for block in re.split(r"\r?\n[ \t]*\r?\n", data.decode("ascii")):
+    for block in re.split(r"\r?\n[ \t]*\r?\n", data.decode("utf-8")):
         lines = [line.strip() for line in block.splitlines()
                  if line.strip() and not line.lstrip().startswith("#")]
         if lines:

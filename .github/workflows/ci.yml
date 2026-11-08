@@ -30,6 +30,16 @@ jobs:
           node --test tests/ca-image-filter.test.cjs
           shellcheck scripts/*.sh
 
+      - name: Verify current upstream root-store formats
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # No repository state is written: this validates both authoritative
+          # source parsers with a disposable initial comparison baseline.
+          python3 scripts/root_trust_monitor.py \
+            --state-dir "$RUNNER_TEMP/root-trust-probe" \
+            --report "$RUNNER_TEMP/root-trust-probe.json"
+
       - name: List the lines
         id: lines
         run: |

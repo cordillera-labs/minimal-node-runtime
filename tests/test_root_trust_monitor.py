@@ -118,8 +118,8 @@ class RootTrustMonitorTests(unittest.TestCase):
             report = pathlib.Path(directory)/'report'
             overlay.write_text('# empty\n')
             def fetch(url, **kwargs):
-                if 'commits/' in url:
-                    return json.dumps({'sha': 'a'*40}).encode()
+                if '/git/ref/heads/' in url:
+                    return json.dumps({'object': {'sha': 'a'*40}}).encode()
                 if 'mozilla-firefox' in url:
                     return nss() + b'# pad\n' * 100_000
                 raise monitor.SourceError('Chrome upstream unavailable')
@@ -137,8 +137,8 @@ class RootTrustMonitorTests(unittest.TestCase):
             overlay.write_text('# initial\n')
             current = {'mozilla': nss(), 'chrome': chrome()}
             def fetch(url, **kwargs):
-                if 'commits/' in url:
-                    return json.dumps({'sha': 'a'*40}).encode()
+                if '/git/ref/heads/' in url:
+                    return json.dumps({'object': {'sha': 'a'*40}}).encode()
                 return ((current['mozilla'] + b'# pad\n' * 100_000)
                         if 'mozilla-firefox' in url else current['chrome'])
             first = monitor.run(state, overlay, report, getter=fetch)
