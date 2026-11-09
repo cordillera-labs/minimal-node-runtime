@@ -335,6 +335,25 @@ Actions to **create pull requests**; ordinary write permissions and CI branch
 protection must also permit the intended merge. Without that, the bot will
 fail visibly and leave the current pinned versions unchanged.
 
+### Advisory metadata compatibility
+
+The security checker interprets GitHub's `patched_versions` strings as
+explicit version claims. Some advisories combine **independent major lines**
+in one record, such as Cosign's
+`<= v3.0.5, <= v2.6.2` with `v3.0.6, v2.6.3`.
+It associates each one-sided affected range with the matching patched
+major, never interpreting those two lines as an AND expression or adopting
+a new major. Unexpected mixtures and ambiguous patches fail closed.
+
+One older Buildx CVE has a stale unbounded affected range and
+`patched_versions: null`, while the **publisher's own Patches section**
+explicitly identifies a fixed version. Only for a published Buildx CVE
+with this exact fixed-version sentence may the checker use that version
+as an explicit patch boundary. This prevents a previously patched pin
+from being incorrectly treated as still vulnerable; the separate newer
+advisories must still be satisfied. It does not infer a fix from general
+release notes, impact prose or arbitrary descriptions.
+
 ### Limits of the evidence
 
 A GHSA with a patched version is evidence that **a particular disclosed
