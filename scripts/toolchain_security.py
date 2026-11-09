@@ -306,7 +306,10 @@ def main(argv):
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
         result = plan(pins,
-                      lambda repo: github_list(toolchain.RELEASES_URL.format(repo=repo)),
+                      # Share the ordinary monitor's Trivy release fallback:
+                      # security planning must not independently fail on the
+                      # same cross-repository GitHub API 403.
+                      toolchain.github_releases,
                       lambda repo: github_list(ADVISORIES_URL.format(repo=repo)))
         with open(args.out, "w", encoding="utf-8") as handle:
             json.dump(result, handle, sort_keys=True, indent=2)
