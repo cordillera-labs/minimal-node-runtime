@@ -162,7 +162,7 @@ class Selection(unittest.TestCase):
     def test_buildx_missing_patch_fails_closed_without_canonical_sentence(self):
         item=advisory("github.com/docker/buildx","0.21.0","0.37.2",None,
                       ghsa="GHSA-gwr2-q96m-6682",cve_id="CVE-2026-93325",
-                      description="### Impact\\nUntrusted definitions.\\n### Patches\\nNo version specified.")
+                      description="### Impact\nUntrusted definitions.\n### Patches\nNo version specified.")
         item["vulnerabilities"][0]["vulnerable_version_range"]=">=0.21.0"
         for missing in (None, "", " ", "None"):
             item["vulnerabilities"][0]["patched_versions"]=missing
