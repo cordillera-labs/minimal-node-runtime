@@ -54,6 +54,16 @@ jobs:
         # "no vulnerabilities". Probe the official Go vulnerability service.
         run: python3 scripts/toolchain_security.py probe-trivy-go-vulndb
 
+      - name: Probe live toolchain security planning (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Exercise the actual advisory-to-version decision using upstream
+          # metadata, not just offline fixtures. Do not write pins or PRs.
+          python3 scripts/toolchain_security.py plan --out "$RUNNER_TEMP/toolchain-security-plan.json"
+          jq -r '.faults[]?' "$RUNNER_TEMP/toolchain-security-plan.json"
+          jq -e '(.faults | length) == 0' "$RUNNER_TEMP/toolchain-security-plan.json"
+
       - name: List the lines
         id: lines
         run: |
