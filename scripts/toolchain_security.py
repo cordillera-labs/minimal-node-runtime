@@ -221,6 +221,11 @@ def pick(tool, repo, pinned, releases, advisories):
     for entry, advisory, patch_map, fixed in entries:
         status = advisory_affected(installed, entry.get("vulnerable_version_range"), patch_map)
         if status and fixed is None:
+            if patch_map and installed[0] not in patch_map:
+                # The published fix exists, but only across a major boundary.
+                # This is a human migration, never an automatic error or
+                # downgrade to an unrelated same-major release.
+                return None
             raise ValueError(f"missing valid patched version for {advisory['ghsa_id']}")
         # A publisher's explicit patched-version claim supersedes a stale
         # unbounded vulnerability-range field for the same installed major.
