@@ -345,10 +345,13 @@ advisories, including smaller advisory pages. The normal version monitor now
 requests ten releases instead of fifty; on an API authorization/rate-limit
 failure it reads GitHub's **public Trivy releases Atom feed** instead.
 The feed's repository identity, self-link, release-tag URLs and timestamps
-are strictly validated. The timestamp is the later of Atom `updated` and
-`published` (when present), which can delay the seven-day cooldown but
-does not make an older release newly eligible early. Corrupt, empty,
-misidentified or unreachable feeds are still faults.
+are strictly validated. Atom `updated` (or a later `published`, when
+present) is used as the best available *observation* timestamp, not
+cryptographic proof of first public release: GitHub's Atom feed is less
+authoritative than its releases API and can reflect tag activity. The
+ordinary toolchain checker only opens an issue; the automatic security lane
+still requires a reviewed direct-module GHSA fix plus full CI. Corrupt,
+empty, misidentified or unreachable feeds remain faults.
 
 For security advisories, Trivy's repository API is unavailable from Actions.
 The security watcher instead queries the **canonical Go vulnerability database**
