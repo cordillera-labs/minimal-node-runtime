@@ -141,7 +141,17 @@ def github_releases(repo):
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    body = upstream.get(RELEASES_URL.format(repo=repo), headers=headers)
+    url = RELEASES_URL.format(repo=repo)
+    try:
+        body = upstream.get(url, headers=headers)
+    except ConnectionError as exc:
+        # A workflow-scoped GitHub token can receive 403 for another public
+        # repository. Retry as an unauthenticated public request instead of
+        # silently missing updates (previously observed with Trivy).
+        if not token or ("HTTP 403" not in str(exc) and "HTTP 401" not in str(exc)):
+            raise
+        public_headers = {key: value for key, value in headers.items() if key != "Authorization"}
+        body = upstream.get(url, headers=public_headers)
     releases = json.loads(body)
     if not isinstance(releases, list):
         raise ValueError("the response is not a list of releases")

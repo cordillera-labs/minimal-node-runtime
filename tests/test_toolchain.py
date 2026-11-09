@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -139,6 +140,27 @@ class Check(unittest.TestCase):
         self.assertEqual(set(pins) - toolchain.NOT_A_TOOL, set(toolchain.TOOLS))
         for key, (_, _, read_pin) in toolchain.TOOLS.items():
             self.assertIsNotNone(read_pin(pins[key]), key)
+
+
+class GithubPublicFallback(unittest.TestCase):
+    def test_403_scoped_token_retries_public_release_endpoint(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "restricted-token"}):
+            with patch.object(toolchain.upstream, "get", side_effect=[
+                ConnectionError("HTTP 403: Forbidden"),
+                json.dumps([release("v0.76.2", "2026-11-05T00:00:00Z")]).encode(),
+            ]) as get:
+                found = toolchain.github_releases("aquasecurity/trivy")
+        self.assertEqual(found[0]["tag_name"], "v0.76.2")
+        self.assertIn("Authorization", get.call_args_list[0].kwargs["headers"])
+        self.assertNotIn("Authorization", get.call_args_list[1].kwargs["headers"])
+
+    def test_404_is_not_mistaken_for_an_authentication_issue(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "restricted-token"}):
+            with patch.object(toolchain.upstream, "get",
+                              side_effect=ConnectionError("HTTP 404")) as get:
+                with self.assertRaises(ConnectionError):
+                    toolchain.github_releases("aquasecurity/trivy")
+                get.assert_called_once()
 
 
 class Rendering(unittest.TestCase):
