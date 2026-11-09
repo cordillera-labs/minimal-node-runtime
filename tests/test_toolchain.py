@@ -229,9 +229,11 @@ class TrivyAtomFallback(unittest.TestCase):
                 ConnectionError("HTTP 403"), ConnectionError("HTTP 403"),
                 ConnectionError("HTTP 403"),
             ]):
-                results = toolchain.check(
-                    dict(Check.PINS), toolchain.github_releases, NOW
-                )
+                def fetch(repo):
+                    if repo == "aquasecurity/trivy":
+                        return toolchain.github_releases(repo)
+                    return [release("v9.0.0", "2026-10-01T00:00:00Z")]
+                results = toolchain.check(dict(Check.PINS), fetch, NOW)
         trivy = next(item for item in results if item["tool"] == "trivy")
         self.assertEqual(trivy["state"], "fault")
         self.assertIn("Atom fallback also failed", trivy["message"])
