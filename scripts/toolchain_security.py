@@ -317,6 +317,16 @@ def main(argv):
         if matches:
             print("Trivy vulnerability records: " +
                   ", ".join(item["id"] for item in matches[0]["vulns"]))
+            for meta in matches[0]["vulns"]:
+                detail = json.loads(upstream.get(
+                    f"https://vuln.go.dev/ID/{meta['id']}.json"))
+                summary = {"id": detail.get("id"), "aliases": detail.get("aliases"),
+                           "review": detail.get("database_specific", {}).get("review_status"),
+                           "published": detail.get("published"), "withdrawn": detail.get("withdrawn"),
+                           "affected": [{"package": a.get("package"),
+                                         "ranges": a.get("ranges")}
+                                        for a in detail.get("affected", [])]}
+                print(json.dumps(summary, sort_keys=True))
         return 0
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
