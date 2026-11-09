@@ -43,6 +43,12 @@ jobs:
             --state-dir "$RUNNER_TEMP/root-trust-probe" \
             --report "$RUNNER_TEMP/root-trust-probe.json"
 
+      - name: Probe live Trivy releases Atom fallback
+        # The regular release API sometimes returns 403 for a long Trivy
+        # release listing. Exercise the independently hosted GitHub feed in
+        # real CI, in addition to the no-network parser fixtures.
+        run: python3 scripts/toolchain.py probe-trivy-atom
+
       - name: List the lines
         id: lines
         run: |
