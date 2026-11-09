@@ -298,11 +298,16 @@ def main(argv):
     subs = parser.add_subparsers(dest="command", required=True)
     p = subs.add_parser("plan")
     p.add_argument("--out", required=True)
+    subs.add_parser("probe-trivy-advisories", help="Read-only live probe of Trivy repository GHSA endpoint")
     a = subs.add_parser("apply")
     a.add_argument("--plan", required=True)
     a.add_argument("--toolchain", default=os.path.join(REPO_ROOT, "toolchain.env"))
     a.add_argument("--digest")
     args = parser.parse_args(argv[1:])
+    if args.command == "probe-trivy-advisories":
+        advisories = github_list(ADVISORIES_URL.format(repo="aquasecurity/trivy"))
+        print(f"Trivy published advisory feed: {len(advisories)} entries")
+        return 0
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
         result = plan(pins,
