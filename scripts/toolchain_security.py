@@ -298,16 +298,25 @@ def main(argv):
     subs = parser.add_subparsers(dest="command", required=True)
     p = subs.add_parser("plan")
     p.add_argument("--out", required=True)
-    subs.add_parser("probe-trivy-advisories", help="Read-only live probe of Trivy repository GHSA endpoint")
+    subs.add_parser("probe-trivy-go-vulndb", help="Read-only live probe of the Go vulnerability database")
     a = subs.add_parser("apply")
     a.add_argument("--plan", required=True)
     a.add_argument("--toolchain", default=os.path.join(REPO_ROOT, "toolchain.env"))
     a.add_argument("--digest")
     args = parser.parse_args(argv[1:])
-    if args.command == "probe-trivy-advisories":
-        url = "https://api.github.com/repos/aquasecurity/trivy/security-advisories?state=published&per_page=10"
-        advisories = github_list(url)
-        print(f"Trivy published advisory feed (10-item page): {len(advisories)} entries")
+    if args.command == "probe-trivy-go-vulndb":
+        url = "https://vuln.go.dev/index/modules.json"
+        payload = json.loads(upstream.get(url))
+        if not isinstance(payload, list) or len(payload) < 100:
+            raise ValueError("Go vulnerability modules index is invalid")
+        matches = [item for item in payload if isinstance(item, dict)
+                   and item.get("path") == "github.com/aquasecurity/trivy"]
+        if len(matches) > 1:
+            raise ValueError("Duplicate Trivy entries in Go vulnerability database")
+        print(f"Go vulnerability database: {len(payload)} modules, Trivy entries: {len(matches)}")
+        if matches:
+            print("Trivy vulnerability records: " +
+                  ", ".join(item["id"] for item in matches[0]["vulns"]))
         return 0
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
