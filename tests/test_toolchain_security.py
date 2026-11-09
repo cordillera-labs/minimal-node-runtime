@@ -146,13 +146,32 @@ class Selection(unittest.TestCase):
         recent["vulnerabilities"][0]["package"]={"ecosystem":"other","name":None}
         recent["vulnerabilities"][0]["vulnerable_version_range"]="<=v0.38.0"
         versions=[release(v) for v in ("v0.37.2","v0.38.0","v0.38.1","v0.38.2")]
-        # The old advisory is *already fixed*; it must not prevent the new fix.
-        result=sec.pick("buildx","docker/buildx","v0.37.2",versions,[old,recent])
-        self.assertEqual(result["to"],"v0.38.1")
-        self.assertEqual(result["advisories"],["GHSA-xg6v-cv2h-2w5h"])
-        # A pin that predates v0.37.2 still needs that earlier patch.
-        self.assertEqual(sec.pick("buildx","docker/buildx","v0.37.1",versions,[old])["to"],"v0.37.2")
-        self.assertIsNone(sec.pick("buildx","docker/buildx","v0.37.2",versions,[old]))
+        # The upstream API represents missing patched_versions as null or "";
+        # both must use only the publisher's exact Patches-section claim.
+        for missing in (None, "", "  ", "None"):
+            with self.subTest(missing=missing):
+                old["vulnerabilities"][0]["patched_versions"]=missing
+                # The old advisory is *already fixed*; it must not block a new fix.
+                result=sec.pick("buildx","docker/buildx","v0.37.2",versions,[old,recent])
+                self.assertEqual(result["to"],"v0.38.1")
+                self.assertEqual(result["advisories"],["GHSA-xg6v-cv2h-2w5h"])
+                # A pin before v0.37.2 must still be patched.
+                self.assertEqual(sec.pick("buildx","docker/buildx","v0.37.1",versions,[old])["to"],"v0.37.2")
+                self.assertIsNone(sec.pick("buildx","docker/buildx","v0.37.2",versions,[old]))
+
+    def test_buildx_missing_patch_fails_closed_without_canonical_sentence(self):
+        item=advisory("github.com/docker/buildx","0.21.0","0.37.2",None,
+                      ghsa="GHSA-gwr2-q96m-6682",cve_id="CVE-2026-93325",
+                      description="### Impact\nUntrusted definitions.\n### Patches\nNo version specified.")
+        item["vulnerabilities"][0]["vulnerable_version_range"]=">=0.21.0"
+        for missing in (None, "", " ", "None"):
+            item["vulnerabilities"][0]["patched_versions"]=missing
+            with self.subTest(missing=missing), self.assertRaisesRegex(ValueError,"missing valid patched"):
+                sec.pick("buildx","docker/buildx","v0.37.1",[release("v0.37.2")],[item])
+        for malformed in ("unknown", "null", "v0.37.x", [], {}):
+            item["vulnerabilities"][0]["patched_versions"]=malformed
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(ValueError,"malformed patched|ambiguous patched"):
+                sec.pick("buildx","docker/buildx","v0.37.1",[release("v0.37.2")],[item])
 
     def test_missing_patch_requires_precise_patches_section_and_cve(self):
         item=advisory("github.com/docker/buildx","0.21.0","0.37.2",None,

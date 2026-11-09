@@ -140,7 +140,12 @@ def patches(entry, advisory, tool):
     if raw is None:
         legacy = entry.get("first_patched_version")
         raw = legacy.get("identifier") if isinstance(legacy, dict) else None
-    if raw is None or raw == "None":
+    # GitHub repository advisories can represent an absent fixed version as
+    # JSON null, an empty/whitespace string, or the legacy display text "None".
+    # These are *missing evidence*, never a claimed fix. Keep every other
+    # malformed value fail-closed rather than treating it as a missing field.
+    if raw is None or (isinstance(raw, str) and raw.strip() in ("", "None")):
+        raw = None
         if tool == "buildx" and CVE.fullmatch(str(advisory.get("cve_id", ""))):
             description = advisory.get("description")
             if isinstance(description, str):
