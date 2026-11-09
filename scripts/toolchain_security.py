@@ -305,8 +305,9 @@ def main(argv):
     a.add_argument("--digest")
     args = parser.parse_args(argv[1:])
     if args.command == "probe-trivy-advisories":
-        advisories = github_list(ADVISORIES_URL.format(repo="aquasecurity/trivy"))
-        print(f"Trivy published advisory feed: {len(advisories)} entries")
+        url = "https://api.github.com/repos/aquasecurity/trivy/security-advisories?state=published&per_page=10"
+        advisories = github_list(url)
+        print(f"Trivy published advisory feed (10-item page): {len(advisories)} entries")
         return 0
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
