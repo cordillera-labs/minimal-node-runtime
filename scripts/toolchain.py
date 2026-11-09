@@ -172,7 +172,7 @@ def trivy_atom_releases(data, now=None):
         raise ValueError("Trivy releases endpoint is not an Atom feed")
     identity = feed.findtext(ATOM + "id", default="").strip()
     if identity != "tag:github.com,2008:/aquasecurity/trivy/releases":
-        raise ValueError("Trivy release feed identity is not aquasecurity/trivy")
+        raise ValueError(f"Trivy release feed identity is not aquasecurity/trivy: {identity!r}")
     if not any(link.get("rel") == "self" and link.get("href") == TRIVY_ATOM_URL
                for link in feed.findall(ATOM + "link")):
         raise ValueError("Trivy release feed has no matching canonical self link")
