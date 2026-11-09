@@ -212,11 +212,14 @@ class SharedTrivyReleaseObservation(unittest.TestCase):
                 with patch.object(sec.toolchain, "github_releases",
                                   return_value=[release("v0.76.2")]) as observer:
                     with patch.object(sec, "github_list", return_value=[]) as advisories:
-                        self.assertEqual(sec.main(["toolchain_security.py", "plan",
-                                                   "--out", str(path)]), 0)
+                        with patch.object(sec.trivy_go_advisories, "fetch_advisories",
+                                          return_value=[]) as trivy_go:
+                            self.assertEqual(sec.main(["toolchain_security.py", "plan",
+                                                       "--out", str(path)]), 0)
             self.assertEqual(observer.call_count, len(sec.toolchain.TOOLS))
             self.assertIn("aquasecurity/trivy", [call.args[0] for call in observer.call_args_list])
-            self.assertEqual(advisories.call_count, len(sec.toolchain.TOOLS))
+            self.assertEqual(advisories.call_count, len(sec.toolchain.TOOLS) - 1)
+            trivy_go.assert_called_once_with(sec.upstream.get)
             self.assertEqual(json.loads(path.read_text())["faults"], [])
 
 
