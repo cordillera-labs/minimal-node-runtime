@@ -49,12 +49,10 @@ jobs:
         # real CI, in addition to the no-network parser fixtures.
         run: python3 scripts/toolchain.py probe-trivy-atom
 
-      - name: Probe Trivy security advisory API
-        # A working releases feed is not enough if GitHub Security Advisories
-        # cannot be read: an outage must remain observable and fail closed.
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python3 scripts/toolchain_security.py probe-trivy-advisories
+      - name: Probe Go vulnerability database for Trivy module
+        # A GitHub Trivy security advisory API 403 cannot be treated as
+        # "no vulnerabilities". Probe the official Go vulnerability service.
+        run: python3 scripts/toolchain_security.py probe-trivy-go-vulndb
 
       - name: List the lines
         id: lines
