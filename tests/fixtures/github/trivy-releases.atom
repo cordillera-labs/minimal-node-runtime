@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en-US">
+  <id>tag:github.com,2008:/aquasecurity/trivy/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/aquasecurity/trivy/releases"/>
+  <link type="application/atom+xml" rel="self" href="https://github.com/aquasecurity/trivy/releases.atom"/>
+  <title>Release notes from trivy</title>
+  <updated>2026-11-05T12:50:25Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/123/v0.76.2</id>
+    <updated>2026-11-05T12:50:25Z</updated>
+    <title>v0.76.2</title>
+    <link rel="alternate" type="text/html" href="https://github.com/aquasecurity/trivy/releases/tag/v0.76.2"/>
+    <content type="html">&lt;p&gt;Security update&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/123/v0.77.0-rc.1</id>
+    <updated>2026-11-06T10:01:00Z</updated>
+    <title>v0.77.0-rc.1</title>
+    <link rel="alternate" type="text/html" href="https://github.com/aquasecurity/trivy/releases/tag/v0.77.0-rc.1"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/123/v0.76.1</id>
+    <updated>2026-10-23T17:34:44Z</updated>
+    <published>2026-10-21T11:18:34Z</published>
+    <title>Trivy v0.76.1</title>
+    <link rel="alternate" type="text/html" href="https://github.com/aquasecurity/trivy/releases/tag/v0.76.1"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/123/nightly</id>
+    <updated>2026-11-06T05:01:00Z</updated>
+    <title>nightly</title>
+    <link rel="alternate" type="text/html" href="https://github.com/aquasecurity/trivy/releases/tag/nightly"/>
+  </entry>
+</feed>
