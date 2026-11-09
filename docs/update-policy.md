@@ -297,9 +297,11 @@ eligible pin and never changes it. A person may review and adopt those updates.
 
 The independent `.github/workflows/toolchain-security.yml` runs hourly at
 minute 31 on `main` (and on manual dispatch). It uses
-`scripts/toolchain_security.py` to read **published security advisories from
-the upstream tool's own GitHub repository**, not merely the text of its release
-notes. The bypass applies only when:
+`scripts/toolchain_security.py` to read **published upstream GitHub
+Security Advisories** for BuildKit, Buildx and Cosign, and the official
+**reviewed Go vulnerability database** for Trivy's own Go module.
+Neither path infers security from arbitrary release-note text.
+The bypass applies only when:
 
 - The advisory identifies the currently pinned version as vulnerable
   with a parseable affected-version range and provides a patched version.
@@ -334,6 +336,41 @@ The first adoption requires enabling the repository setting allowing GitHub
 Actions to **create pull requests**; ordinary write permissions and CI branch
 protection must also permit the intended merge. Without that, the bot will
 fail visibly and leave the current pinned versions unchanged.
+
+### Trivy 403 recovery and Go advisory coverage
+
+GitHub Actions has repeatedly received HTTP 403 from both authenticated and
+anonymous requests for `aquasecurity/trivy` releases and repository security
+advisories, including smaller advisory pages. The normal version monitor now
+requests ten releases instead of fifty; on an API authorization/rate-limit
+failure it reads GitHub's **public Trivy releases Atom feed** instead.
+The feed's repository identity, self-link, release-tag URLs and timestamps
+are strictly validated. Atom `updated` (or a later `published`, when
+present) is used as the best available *observation* timestamp, not
+cryptographic proof of first public release: GitHub's Atom feed is less
+authoritative than its releases API and can reflect tag activity. The
+ordinary toolchain checker only opens an issue; the automatic security lane
+still requires a reviewed direct-module GHSA fix plus full CI. Corrupt,
+empty, misidentified or unreachable feeds remain faults.
+
+For security advisories, Trivy's repository API is unavailable from Actions.
+The security watcher instead queries the **canonical Go vulnerability database**
+at `https://vuln.go.dev/index/modules.json` and the referenced OSV reports
+for exactly `github.com/aquasecurity/trivy`. Only records reviewed by the
+Go security team, explicitly naming the direct Trivy module, with a GHSA
+alias and unambiguous introduced/fixed semantic versions can authorize a
+cooldown bypass. Unreviewed, withdrawn, dependency-only and ambiguous records
+do not authorize automatic upgrades. Live CI probes both the GitHub Atom feed
+and official Go vulnerability database; offline tests cover malformed data.
+
+**Coverage limitation:** Go's vulnerability database is not a complete list
+of Trivy CLI, distribution, build-pipeline or dependency vulnerabilities.
+Security fixes absent from reviewed direct-module OSV reports are handled
+through the existing ordinary cooldown/manual upgrade issues, not falsely
+classified as safe fast-path updates. The current pinned v0.74.0 is newer than
+the fixed versions for all five direct-module entries observed on 2026-11-09;
+there is no outstanding direct Go-module security update indicated by that
+source.
 
 ### Advisory metadata compatibility
 
@@ -373,7 +410,8 @@ For each nonsecurity tool with an eligible release, the existing hourly
 always update tag and digest together; BuildKit and Buildx should never change
 in the same PR.
 
-When the GitHub lookup fails, or a pin cannot be read, the job reports a fault in
+When the normal GitHub release lookup and any validated fallback fail, or
+a pin cannot be read, the job reports a fault in
 the run summary and as an annotation, opens no issue and leaves the tool's issue
 as it was. A fault is not "no update". The job is independent of the lines, so a
 fault never delays or fails a publication. A key added to `toolchain.env` with no

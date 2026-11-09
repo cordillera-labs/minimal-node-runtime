@@ -27,6 +27,8 @@ import json
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lock as lockfile  # noqa: E402  (REPO_ROOT)
@@ -34,6 +36,14 @@ import policy  # noqa: E402
 import upstream  # noqa: E402
 
 RELEASES_URL = "https://api.github.com/repos/{repo}/releases?per_page=50"
+TRIVY_REPO = "aquasecurity/trivy"
+# Trivy ships many release assets: the 50-item response can be large and
+# repeatedly 403s in Actions, even after removing the workflow token.
+TRIVY_RELEASES_URL = "https://api.github.com/repos/aquasecurity/trivy/releases?per_page=10"
+TRIVY_ATOM_URL = "https://github.com/aquasecurity/trivy/releases.atom"
+ATOM = "{http://www.w3.org/2005/Atom}"
+MAX_ATOM_BYTES = 6 * 1024 * 1024
+
 STABLE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 IMAGE_TAG = re.compile(r"^[a-z0-9./_-]+:(v\d+\.\d+\.\d+)(?:@sha256:[0-9a-f]{64})?$")
 VERSION_PIN = re.compile(r"^v\d+\.\d+\.\d+$")
@@ -136,22 +146,116 @@ def check(pins, fetch_releases, now):
     return results
 
 
+def rate_limited(error):
+    """Only authentication/rate-limit failures justify a different endpoint."""
+    return bool(re.search(r"\b(401|403|429)\b", str(error)))
+
+
+def trivy_atom_releases(data, now=None):
+    """GitHub's public release Atom feed as a conservative API fallback.
+
+    Feed entries provide <updated>, not necessarily the original <published>.
+    Using the newer timestamp for the cooldown can DELAY an update, never
+    shorten the wait. Only exact GitHub-hosted Trivy release-tag links qualify.
+    A malformed/empty/cross-repository feed is a lookup fault, not "current".
+    """
+    if not isinstance(data, bytes) or len(data) > MAX_ATOM_BYTES or not data:
+        raise ValueError("Trivy release feed is empty or too large")
+    # Avoid entity-expansion and non-feed XML documents.
+    if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
+        raise ValueError("Trivy release feed contains DTD/entity declarations")
+    try:
+        feed = ET.fromstring(data)
+    except ET.ParseError as exc:
+        raise ValueError("Trivy release Atom XML is malformed") from exc
+    if feed.tag != ATOM + "feed":
+        raise ValueError("Trivy releases endpoint is not an Atom feed")
+    identity = feed.findtext(ATOM + "id", default="").strip()
+    if identity != "tag:github.com,2008:https://github.com/aquasecurity/trivy/releases":
+        raise ValueError("Trivy release feed identity is not aquasecurity/trivy")
+    if not any(link.get("rel") == "self" and link.get("href") == TRIVY_ATOM_URL
+               for link in feed.findall(ATOM + "link")):
+        raise ValueError("Trivy release feed has no matching canonical self link")
+    entries = feed.findall(ATOM + "entry")
+    if not 1 <= len(entries) <= 100:
+        raise ValueError("Trivy release feed must contain 1–100 entries")
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    results = []
+    seen = set()
+    for entry in entries:
+        hrefs = [link.get("href", "") for link in entry.findall(ATOM + "link")
+                 if link.get("rel") == "alternate" and link.get("type") in (None, "text/html")]
+        if len(hrefs) != 1:
+            raise ValueError("Trivy release entry lacks one canonical HTML link")
+        u = urlsplit(hrefs[0])
+        prefix = "/aquasecurity/trivy/releases/tag/"
+        if (u.scheme != "https" or u.netloc != "github.com" or
+                not u.path.startswith(prefix) or u.query or u.fragment):
+            raise ValueError("Trivy release entry link has wrong repository or format")
+        tag = u.path[len(prefix):]
+        if not tag or "/" in tag or tag in seen:
+            raise ValueError("Trivy release entry tag is missing or duplicated")
+        seen.add(tag)
+        stamps = []
+        for tagname in ("updated", "published"):
+            raw = entry.findtext(ATOM + tagname)
+            if raw:
+                try:
+                    moment = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise ValueError("Trivy Atom entry timestamp is invalid") from exc
+                if moment.tzinfo is None:
+                    raise ValueError("Trivy Atom entry timestamp lacks timezone")
+                stamps.append(moment.astimezone(datetime.timezone.utc))
+        if not stamps:
+            raise ValueError("Trivy Atom entry has no timestamp")
+        observed = max(stamps)
+        if observed > now + datetime.timedelta(days=1):
+            raise ValueError("Trivy Atom entry timestamp is in the future")
+        if not STABLE_TAG.fullmatch(tag):
+            continue  # nightly, draft-like tags and prereleases are not stable
+        results.append({
+            "tag_name": tag,
+            "draft": False,
+            "prerelease": False,
+            "published_at": observed.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "html_url": hrefs[0],
+        })
+    if not results:
+        raise ValueError("Trivy Atom feed contains no stable releases")
+    return results
+
+
 def github_releases(repo):
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    url = RELEASES_URL.format(repo=repo)
+    url = TRIVY_RELEASES_URL if repo == TRIVY_REPO else RELEASES_URL.format(repo=repo)
+    api_error = None
     try:
         body = upstream.get(url, headers=headers)
     except ConnectionError as exc:
-        # A workflow-scoped GitHub token can receive 403 for another public
-        # repository. Retry as an unauthenticated public request instead of
-        # silently missing updates (previously observed with Trivy).
-        if not token or ("HTTP 403" not in str(exc) and "HTTP 401" not in str(exc)):
-            raise
-        public_headers = {key: value for key, value in headers.items() if key != "Authorization"}
-        body = upstream.get(url, headers=public_headers)
+        if not token or not rate_limited(exc):
+            api_error = exc
+        else:
+            public_headers = {key: value for key, value in headers.items() if key != "Authorization"}
+            try:
+                body = upstream.get(url, headers=public_headers)
+            except ConnectionError as public_exc:
+                api_error = public_exc
+    if api_error is not None:
+        if repo != TRIVY_REPO or not rate_limited(api_error):
+            raise api_error
+        # Public Github's Atom endpoint is not subject to api.github.com's
+        # token/IP rate limits. Fail closed if it is unavailable or ambiguous.
+        try:
+            return trivy_atom_releases(
+                upstream.get(TRIVY_ATOM_URL, headers={"Accept": "application/atom+xml"}))
+        except (ConnectionError, ValueError) as feed_exc:
+            raise ConnectionError(
+                f"Trivy GitHub release API failed ({api_error}); "
+                f"Atom fallback also failed ({feed_exc})") from feed_exc
     releases = json.loads(body)
     if not isinstance(releases, list):
         raise ValueError("the response is not a list of releases")
@@ -206,12 +310,19 @@ def summary(results):
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
+    probe = sub.add_parser("probe-trivy-atom", help="Live read-only check of GitHub Trivy Atom fallback")
     check_parser = sub.add_parser("check")
     check_parser.add_argument("--toolchain", default=os.path.join(lockfile.REPO_ROOT, "toolchain.env"))
     check_parser.add_argument("--out", required=True)
     check_parser.add_argument("--summary")
     check_parser.add_argument("--now", help="ISO time; default the current time")
     args = parser.parse_args(argv[1:])
+
+    if args.command == "probe-trivy-atom":
+        found = trivy_atom_releases(
+            upstream.get(TRIVY_ATOM_URL, headers={"Accept": "application/atom+xml"}))
+        print("Trivy Atom live probe: " + ", ".join(item["tag_name"] for item in found))
+        return 0
 
     now = policy.parse_time(args.now) if args.now else datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
     results = check(read_pins(args.toolchain), github_releases, now)

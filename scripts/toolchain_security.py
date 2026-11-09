@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Plan and apply narrowly scoped, CVE/GHSA-backed toolchain security upgrades.
 
-Only *published repository advisories* naming the tool's own Go module and
-giving an affected version range plus a first patched version authorize an
-automatic cooldown bypass. Never infer that a release is safe from an arbitrary
-CVE mention in release notes or from a dependency-only advisory.
+Only published, versioned upstream advisories for the tool itself, or
+reviewed GHSA-linked entries from the canonical Go vulnerability database
+for Trivy, can authorize an automatic cooldown bypass. Never infer a release
+is safe from arbitrary CVE mentions in release notes or dependency-only data.
 
 The separate Actions workflow upgrades one pin at a time, verifies a registry
 image digest, runs the full CI workflow on the exact branch commit and merges
@@ -21,6 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import toolchain  # noqa: E402
 import upstream  # noqa: E402
+import trivy_go_advisories  # noqa: E402
 
 REPO_ROOT = toolchain.lockfile.REPO_ROOT
 # These must be the *tool itself*, not a dependency pulled into the tool.
@@ -295,6 +296,15 @@ def github_list(url):
     return result
 
 
+def tool_advisories(repo):
+    # GitHub blocks Trivy's public release and advisory API requests (403)
+    # from our Actions runners. The official Go vulnerability database is a
+    # narrower but authoritative source for reviewed, direct-module GHSA fixes.
+    if repo == "aquasecurity/trivy":
+        return trivy_go_advisories.fetch_advisories(upstream.get)
+    return github_list(ADVISORIES_URL.format(repo=repo))
+
+
 def plan(pins, fetch_releases, fetch_advisories):
     choices = []
     faults = []
@@ -373,16 +383,23 @@ def main(argv):
     subs = parser.add_subparsers(dest="command", required=True)
     p = subs.add_parser("plan")
     p.add_argument("--out", required=True)
+    subs.add_parser("probe-trivy-go-vulndb", help="Read-only live probe of the Go vulnerability database")
     a = subs.add_parser("apply")
     a.add_argument("--plan", required=True)
     a.add_argument("--toolchain", default=os.path.join(REPO_ROOT, "toolchain.env"))
     a.add_argument("--digest")
     args = parser.parse_args(argv[1:])
+    if args.command == "probe-trivy-go-vulndb":
+        reviewed = trivy_go_advisories.fetch_advisories(upstream.get)
+        print(f"Reviewed Trivy Go vulnerability reports with direct GHSA aliases: {len(reviewed)}")
+        for row in reviewed:
+            print(f"- {row['ghsa_id']}: {len(row['vulnerabilities'])} affected version range(s)")
+        return 0
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
         result = plan(pins,
-                      lambda repo: github_list(toolchain.RELEASES_URL.format(repo=repo)),
-                      lambda repo: github_list(ADVISORIES_URL.format(repo=repo)))
+                      toolchain.github_releases,
+                      tool_advisories)
         with open(args.out, "w", encoding="utf-8") as handle:
             json.dump(result, handle, sort_keys=True, indent=2)
             handle.write("\n")

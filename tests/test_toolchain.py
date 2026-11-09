@@ -163,6 +163,104 @@ class GithubPublicFallback(unittest.TestCase):
                 get.assert_called_once()
 
 
+class TrivyAtomFallback(unittest.TestCase):
+    """The GitHub API 403 and the authenticated/release-feed path are distinct."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "tests", "fixtures", "github", "trivy-releases.atom")
+        with open(path, "rb") as handle:
+            cls.atom = handle.read()
+
+    def test_feed_includes_only_stable_and_uses_later_updated_date(self):
+        releases = toolchain.trivy_atom_releases(self.atom, NOW)
+        self.assertEqual([item["tag_name"] for item in releases], ["v0.76.2", "v0.76.1"])
+        self.assertEqual(releases[1]["published_at"], "2026-10-23T17:34:44Z")
+        result = toolchain.evaluate("trivy", "aquasecurity/trivy", "v0.74.0", releases, NOW)
+        self.assertEqual(result["eligible"]["tag"], "v0.76.1")
+        self.assertEqual(result["pending"]["tag"], "v0.76.2")
+
+    def test_real_failure_pattern_authenticated_and_public_api_403(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "restricted-token"}):
+            with patch.object(toolchain.upstream, "get", side_effect=[
+                ConnectionError("GET Trivy API: HTTP Error 403: Forbidden"),
+                ConnectionError("GET Trivy API: HTTP Error 403: Forbidden"),
+                self.atom,
+            ]) as get:
+                releases = toolchain.github_releases("aquasecurity/trivy")
+        self.assertEqual(releases[0]["tag_name"], "v0.76.2")
+        self.assertEqual(get.call_count, 3)
+        self.assertIn("?per_page=10", get.call_args_list[0].args[0])
+        self.assertIn("Authorization", get.call_args_list[0].kwargs["headers"])
+        self.assertNotIn("Authorization", get.call_args_list[1].kwargs["headers"])
+        self.assertEqual(get.call_args_list[2].args[0], toolchain.TRIVY_ATOM_URL)
+        self.assertNotIn("Authorization", get.call_args_list[2].kwargs["headers"])
+
+    def test_public_api_rate_limit_without_token_also_recovers(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": ""}):
+            with patch.object(toolchain.upstream, "get", side_effect=[
+                ConnectionError("HTTP 429: Too Many Requests"), self.atom
+            ]) as get:
+                result = toolchain.github_releases("aquasecurity/trivy")
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(result[0]["tag_name"], "v0.76.2")
+
+    def test_trivy_api_success_does_not_call_feed(self):
+        expected = [release("v0.76.2", "2026-11-05T12:50:25Z")]
+        with patch.object(toolchain.upstream, "get", return_value=json.dumps(expected).encode()) as get:
+            actual = toolchain.github_releases("aquasecurity/trivy")
+        self.assertEqual(actual, expected)
+        get.assert_called_once()
+
+    def test_fallback_not_allowed_on_404_or_for_other_repositories(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "restricted-token"}):
+            with patch.object(toolchain.upstream, "get", side_effect=ConnectionError("HTTP 404")) as get:
+                with self.assertRaises(ConnectionError):
+                    toolchain.github_releases("aquasecurity/trivy")
+                get.assert_called_once()
+            with patch.object(toolchain.upstream, "get", side_effect=ConnectionError("HTTP 403")) as get:
+                with self.assertRaises(ConnectionError):
+                    toolchain.github_releases("docker/buildx")
+                self.assertEqual(get.call_count, 2)
+
+    def test_both_sources_fail_reports_fault_not_current(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "restricted-token"}):
+            with patch.object(toolchain.upstream, "get", side_effect=[
+                ConnectionError("HTTP 403"), ConnectionError("HTTP 403"),
+                ConnectionError("HTTP 403"),
+            ]):
+                def fetch(repo):
+                    if repo == "aquasecurity/trivy":
+                        return toolchain.github_releases(repo)
+                    return [release("v9.0.0", "2026-10-01T00:00:00Z")]
+                results = toolchain.check(dict(Check.PINS), fetch, NOW)
+        trivy = next(item for item in results if item["tool"] == "trivy")
+        self.assertEqual(trivy["state"], "fault")
+        self.assertIn("Atom fallback also failed", trivy["message"])
+
+    def test_identity_bad_links_and_bad_timestamps_fail_closed(self):
+        variants = [
+            self.atom.replace(b"/aquasecurity/trivy/releases</id>", b"/foreign/repo/releases</id>"),
+            self.atom.replace(b"releases.atom", b"tags.atom"),
+            self.atom.replace(b"aquasecurity/trivy/releases/tag/v0.76.2",
+                              b"another/repository/releases/tag/v0.76.2"),
+            self.atom.replace(b"2026-11-05T12:50:25Z", b"3000-01-01T00:00:00Z"),
+            self.atom.replace(b"2026-11-05T12:50:25Z", b"not-a-timestamp"),
+            self.atom.replace(b"</feed>", b""),
+            b"<html><body>403</body></html>",
+            b"<!DOCTYPE feed [<!ENTITY test 'x'>]><feed></feed>",
+        ]
+        for raw in variants:
+            with self.subTest(raw=raw[:90]):
+                with self.assertRaises(ValueError):
+                    toolchain.trivy_atom_releases(raw, NOW)
+
+    def test_feed_must_contain_a_stable_release(self):
+        data = self.atom.replace(b"/releases/tag/v0.76.2", b"/releases/tag/nightly-1")
+        data = data.replace(b"/releases/tag/v0.76.1", b"/releases/tag/nightly-2")
+        self.assertRaises(ValueError, toolchain.trivy_atom_releases, data, NOW)
+
+
 class Rendering(unittest.TestCase):
     def test_issue_text_names_the_tool_pin_and_release(self):
         result = toolchain.evaluate("trivy", "aquasecurity/trivy", "v0.74.0", TRIVY_RELEASES, NOW)
