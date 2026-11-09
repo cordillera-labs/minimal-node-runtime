@@ -202,6 +202,24 @@ class LiveFeedValidation(unittest.TestCase):
                 sec.github_list("https://api.github.com/repos/moby/buildkit/security-advisories?state=published&per_page=100")
 
 
+class SharedTrivyReleaseObservation(unittest.TestCase):
+    def test_security_plan_uses_the_same_release_fallback_as_normal_monitor(self):
+        # Regression: toolchain-security used to bypass toolchain.github_releases
+        # and query the broken 50-item Trivy API endpoint independently.
+        with tempfile.TemporaryDirectory() as dirname:
+            path = Path(dirname) / "result.json"
+            with patch.object(sec.toolchain, "read_pins", return_value=dict(Plan.PINS)):
+                with patch.object(sec.toolchain, "github_releases",
+                                  return_value=[release("v0.76.2")]) as observer:
+                    with patch.object(sec, "github_list", return_value=[]) as advisories:
+                        self.assertEqual(sec.main(["toolchain_security.py", "plan",
+                                                   "--out", str(path)]), 0)
+            self.assertEqual(observer.call_count, len(sec.toolchain.TOOLS))
+            self.assertIn("aquasecurity/trivy", [call.args[0] for call in observer.call_args_list])
+            self.assertEqual(advisories.call_count, len(sec.toolchain.TOOLS))
+            self.assertEqual(json.loads(path.read_text())["faults"], [])
+
+
 class Apply(unittest.TestCase):
     def test_exactly_one_image_pin_changes_with_digest(self):
         with tempfile.TemporaryDirectory() as dirname:
