@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Plan and apply narrowly scoped, CVE/GHSA-backed toolchain security upgrades.
 
-Only *published repository advisories* naming the tool's own Go module and
-giving an affected version range plus a first patched version authorize an
-automatic cooldown bypass. Never infer that a release is safe from an arbitrary
-CVE mention in release notes or from a dependency-only advisory.
+Only published, versioned upstream advisories for the tool itself, or
+reviewed GHSA-linked entries from the canonical Go vulnerability database
+for Trivy, can authorize an automatic cooldown bypass. Never infer a release
+is safe from arbitrary CVE mentions in release notes or dependency-only data.
 
 The separate Actions workflow upgrades one pin at a time, verifies a registry
 image digest, runs the full CI workflow on the exact branch commit and merges
