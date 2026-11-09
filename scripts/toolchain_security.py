@@ -21,6 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import toolchain  # noqa: E402
 import upstream  # noqa: E402
+import trivy_go_advisories  # noqa: E402
 
 REPO_ROOT = toolchain.lockfile.REPO_ROOT
 # These must be the *tool itself*, not a dependency pulled into the tool.
@@ -220,6 +221,15 @@ def github_list(url):
     return result
 
 
+def tool_advisories(repo):
+    # GitHub blocks Trivy's public release and advisory API requests (403)
+    # from our Actions runners. The official Go vulnerability database is a
+    # narrower but authoritative source for reviewed, direct-module GHSA fixes.
+    if repo == "aquasecurity/trivy":
+        return trivy_go_advisories.fetch_advisories(upstream.get)
+    return github_list(ADVISORIES_URL.format(repo=repo))
+
+
 def plan(pins, fetch_releases, fetch_advisories):
     choices = []
     faults = []
@@ -305,28 +315,10 @@ def main(argv):
     a.add_argument("--digest")
     args = parser.parse_args(argv[1:])
     if args.command == "probe-trivy-go-vulndb":
-        url = "https://vuln.go.dev/index/modules.json"
-        payload = json.loads(upstream.get(url))
-        if not isinstance(payload, list) or len(payload) < 100:
-            raise ValueError("Go vulnerability modules index is invalid")
-        matches = [item for item in payload if isinstance(item, dict)
-                   and item.get("path") == "github.com/aquasecurity/trivy"]
-        if len(matches) > 1:
-            raise ValueError("Duplicate Trivy entries in Go vulnerability database")
-        print(f"Go vulnerability database: {len(payload)} modules, Trivy entries: {len(matches)}")
-        if matches:
-            print("Trivy vulnerability records: " +
-                  ", ".join(item["id"] for item in matches[0]["vulns"]))
-            for meta in matches[0]["vulns"]:
-                detail = json.loads(upstream.get(
-                    f"https://vuln.go.dev/ID/{meta['id']}.json"))
-                summary = {"id": detail.get("id"), "aliases": detail.get("aliases"),
-                           "review": detail.get("database_specific", {}).get("review_status"),
-                           "published": detail.get("published"), "withdrawn": detail.get("withdrawn"),
-                           "affected": [{"package": a.get("package"),
-                                         "ranges": a.get("ranges")}
-                                        for a in detail.get("affected", [])]}
-                print(json.dumps(summary, sort_keys=True))
+        reviewed = trivy_go_advisories.fetch_advisories(upstream.get)
+        print(f"Reviewed Trivy Go vulnerability reports with direct GHSA aliases: {len(reviewed)}")
+        for row in reviewed:
+            print(f"- {row['ghsa_id']}: {len(row['vulnerabilities'])} affected version range(s)")
         return 0
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
@@ -335,7 +327,7 @@ def main(argv):
                       # security planning must not independently fail on the
                       # same cross-repository GitHub API 403.
                       toolchain.github_releases,
-                      lambda repo: github_list(ADVISORIES_URL.format(repo=repo)))
+                      tool_advisories)
         with open(args.out, "w", encoding="utf-8") as handle:
             json.dump(result, handle, sort_keys=True, indent=2)
             handle.write("\n")
