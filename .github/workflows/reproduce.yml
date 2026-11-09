@@ -4,6 +4,13 @@
 name: reproduce
 
 on:
+  # Exercise historical publication replay in read-only mode when this
+  # workflow or its replay implementation changes. No issue writes on PRs.
+  pull_request:
+    paths:
+      - '.github/workflows/reproduce.yml'
+      - 'scripts/reproduce.sh'
+      - 'scripts/lock.py'
   schedule:
     - cron: '43 5 * * 1'
   workflow_dispatch:
@@ -56,7 +63,6 @@ jobs:
           LINE: ${{ matrix.lock.line }}
           CHANNEL: ${{ matrix.lock.channel }}
         run: |
-          grep -E '^[A-Z_]+=' toolchain.env >> "$GITHUB_ENV"
           [[ "$LINE" =~ ^[1-9][0-9]{0,2}$ ]] || { echo "invalid line $LINE"; exit 1; }
           case "$CHANNEL" in stable | candidate) ;; *) echo "invalid channel $CHANNEL"; exit 1 ;; esac
           lock="state/$LINE/$CHANNEL.lock"
@@ -65,7 +71,11 @@ jobs:
             exit 0
           fi
           cp "$lock" "$RUNNER_TEMP/published.lock"
-          echo "commit=$(python3 scripts/lock.py get "$lock" PUBLISHED_COMMIT)" >> "$GITHUB_OUTPUT"
+          commit=$(python3 scripts/lock.py get "$lock" PUBLISHED_COMMIT)
+          # The buildx CLI, not just BuildKit, must match the historical build.
+          # Do not accidentally use a newer pin from the workflow's main checkout.
+          git show "$commit:toolchain.env" | grep -E '^[A-Z_]+=' >> "$GITHUB_ENV"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "tag=$(python3 scripts/lock.py get "$lock" PUBLISHED_TAG)" >> "$GITHUB_OUTPUT"
 
       - name: Install the pinned buildx
@@ -86,21 +96,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # The .deb assets of the release come first; a missing or mismatched
-          # asset falls back to snapshot.debian.org (scripts/fetch-debs.sh).
-          mkdir -p "$RUNNER_TEMP/release-debs"
+          # Reproduce the *historical published inputs*, not newer channel
+          # metadata. A later non-byte-changing toolchain/build-definition
+          # acceptance may update the channel lock without republishing the
+          # digest or changing its original PUBLISHED_COMMIT.
+          published=$(python3 scripts/lock.py get "$RUNNER_TEMP/published.lock" PUBLISHED_DIGEST)
+          mkdir -p "$RUNNER_TEMP/release-inputs" "$RUNNER_TEMP/release-debs"
+          gh release download "$TAG" --pattern 'inputs.lock' --dir "$RUNNER_TEMP/release-inputs"
+          # The .deb assets come first; missing assets fall back to the pinned
+          # snapshot URL and the immutable SHA-256 still decides acceptance.
           gh release download "$TAG" --pattern '*.deb' --dir "$RUNNER_TEMP/release-debs" \
             || echo "the release $TAG has no .deb assets; snapshot.debian.org serves them"
+          release_commit=$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)
+          [ "$release_commit" = "$COMMIT" ] || { echo "release $TAG targets $release_commit, recorded commit is $COMMIT"; exit 1; }
           git worktree add --detach "$RUNNER_TEMP/source" "$COMMIT"
           cd "$RUNNER_TEMP/source"
-          DEBS_FROM="$RUNNER_TEMP/release-debs" scripts/reproduce.sh "$RUNNER_TEMP/published.lock" "$RUNNER_TEMP/out"
-          published=$(python3 scripts/lock.py get "$RUNNER_TEMP/published.lock" PUBLISHED_DIGEST)
+          release_lock="$RUNNER_TEMP/release-inputs/inputs.lock"
+          actual_tag=$(python3 scripts/lock.py tag "$release_lock")
+          [ "$actual_tag" = "$TAG" ] || { echo "release inputs produce tag $actual_tag, expected $TAG"; exit 1; }
+          # The release asset predates the publication record; attach the
+          # current recorded digest solely as a post-build comparison.
+          python3 scripts/lock.py set "$release_lock" "PUBLISHED_DIGEST=$published"
+          DEBS_FROM="$RUNNER_TEMP/release-debs" scripts/reproduce.sh "$release_lock" "$RUNNER_TEMP/out"
           registry=$(docker buildx imagetools inspect "$IMAGE_REPOSITORY@$published" --format '{{json .Manifest}}' | jq -r .digest)
           [ "$registry" = "$published" ] || { echo "the registry does not serve $published"; exit 1; }
 
   report:
     needs: reproduce
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
