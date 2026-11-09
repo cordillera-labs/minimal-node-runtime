@@ -116,44 +116,122 @@ def direct_entries(tool, advisory, installed_major):
     return selected
 
 
-def pick(tool, repo, pinned, releases, advisories):
-    """Return the *lowest* published fixed release in the same major line.
+# Repository advisories sometimes combine *independent major lines* in one
+# vulnerability entry (Cosign: "<= v3.0.5, <= v2.6.2" / "v3.0.6, v2.6.3").
+# A comma is therefore not necessarily logical AND. Interpret this special
+# form only when each major has exactly one comparator and one fixed version.
+ADVISORY_PATCH_SENTENCE = re.compile(
+    r"(?im)^\s*(?:The )?[Ii]ssue has been fixed in version "
+    r"(v?[0-9]+\.[0-9]+\.[0-9]+\+?)\.\s*$"
+)
+PATCH_HEADING = re.compile(r"(?im)^#{2,4}\s*Patches\s*$")
+NEXT_HEADING = re.compile(r"(?m)^#{2,4}\s+\S")
 
-    Restrict to releases that solve all known, directly applicable GHSA
-    advisories, not just the first. An unknown affected range or missing
-    patch cannot certify the upgrade and blocks automation.
+
+def patches(entry, advisory, tool):
+    """An explicit fixed version for each major, or None if not provided.
+
+    Reject arbitrary prose and malformed/ambiguous lists. A narrow exception
+    handles older *published Buildx CVEs* whose structured patched_versions
+    field is null despite an exact fixed-version sentence in the publisher's
+    own Patches section. Never mine generic release notes.
+    """
+    raw = entry.get("patched_versions")
+    if raw is None:
+        legacy = entry.get("first_patched_version")
+        raw = legacy.get("identifier") if isinstance(legacy, dict) else None
+    if raw is None or raw == "None":
+        if tool == "buildx" and CVE.fullmatch(str(advisory.get("cve_id", ""))):
+            description = advisory.get("description")
+            if isinstance(description, str):
+                heading = PATCH_HEADING.search(description)
+                if heading:
+                    tail = description[heading.end():]
+                    end = NEXT_HEADING.search(tail)
+                    paragraph = tail[:end.start()] if end else tail
+                    statements = ADVISORY_PATCH_SENTENCE.findall(paragraph)
+                    if len(statements) == 1:
+                        raw = statements[0]
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"malformed patched versions for {advisory['ghsa_id']}")
+    found = {}
+    for part in raw.split(","):
+        token = part.strip()
+        # Repository advisories sometimes suffix a fixed version with '+',
+        # meaning this release and later. Never accept a compound range here.
+        fixed = version(token[:-1] if token.endswith("+") else token)
+        if fixed is None or fixed[0] in found:
+            raise ValueError(f"ambiguous patched versions for {advisory['ghsa_id']}")
+        found[fixed[0]] = fixed
+    return found
+
+
+def advisory_affected(v, expression, patch_map):
+    """Evaluate a complete, unambiguous range for the given version line.
+
+    A multi-major patch list permits one comparator per matching major. Other
+    comma-separated ranges retain the normal AND semantics in affected().
+    """
+    if not patch_map or len(patch_map) == 1:
+        return affected(v, expression)
+    if not isinstance(expression, str):
+        return None
+    clauses = [part.strip() for part in expression.split(",")]
+    if len(clauses) != len(patch_map):
+        return None
+    by_major = {}
+    for clause in clauses:
+        match = BOUND.fullmatch(clause)
+        if not match:
+            return None
+        major = int(match.group(2))
+        if major in by_major:
+            return None
+        by_major[major] = clause
+    if set(by_major) != set(patch_map):
+        return None
+    return affected(v, by_major[v[0]]) if v[0] in by_major else False
+
+
+def pick(tool, repo, pinned, releases, advisories):
+    """Choose the earliest published same-major release that fixes all GHSA risks.
+
+    A patched version takes precedence over an older advisories' stale
+    unbounded vulnerable range (Buildx GHSA-gwr2-q96m-6682 still says
+    '>=0.21.0' despite its Patches section naming v0.37.2).
+    Unknown/malformed metadata fails closed; an already-fixed pin needs no
+    additional update for that advisory.
     """
     installed = version(pinned)
     if installed is None:
         raise ValueError("invalid pinned version")
     if not isinstance(advisories, list) or not isinstance(releases, list):
         raise ValueError("upstream security metadata is not a list")
-    all_entries = []
+    entries = []
     for advisory in advisories:
-        all_entries.extend(direct_entries(tool, advisory, installed[0]))
+        for entry, source in direct_entries(tool, advisory, installed[0]):
+            patch_map = patches(entry, source, tool)
+            status = advisory_affected(installed, entry.get("vulnerable_version_range"), patch_map)
+            if status is None:
+                raise ValueError(f"unparseable affected version range for {source['ghsa_id']}")
+            fixed = patch_map.get(installed[0]) if patch_map else None
+            entries.append((entry, source, patch_map, fixed))
     fixing = []
-    for entry, advisory in all_entries:
-        match = affected(installed, entry.get("vulnerable_version_range"))
-        if match is None:
-            raise ValueError(f"unparseable affected version range for {advisory['ghsa_id']}")
-        if not match:
-            continue
-        # Repository advisory REST responses use patched_versions (a
-        # version string). The global GitHub advisory schema may instead
-        # provide first_patched_version: {identifier: ...}. Do not guess at
-        # multiple ranges or a version omitted from the authoritative feed.
-        patched = entry.get("patched_versions")
-        if patched is None:
-            legacy = entry.get("first_patched_version")
-            patched = legacy.get("identifier") if isinstance(legacy, dict) else None
-        if isinstance(patched, str) and patched.endswith("+"):
-            # GitHub's product-level advisories use vMAJOR.MINOR.PATCH+
-            # to mean that release and newer. A single terminal '+' is the
-            # only accepted suffix; never parse arbitrary version ranges.
-            patched = patched[:-1]
-        fixed = version(patched)
-        if fixed is None or fixed <= installed:
+    for entry, advisory, patch_map, fixed in entries:
+        status = advisory_affected(installed, entry.get("vulnerable_version_range"), patch_map)
+        if status and fixed is None:
+            if patch_map and installed[0] not in patch_map:
+                # The published fix exists, but only across a major boundary.
+                # This is a human migration, never an automatic error or
+                # downgrade to an unrelated same-major release.
+                return None
             raise ValueError(f"missing valid patched version for {advisory['ghsa_id']}")
+        # A publisher's explicit patched-version claim supersedes a stale
+        # unbounded vulnerability-range field for the same installed major.
+        if not status or (fixed is not None and installed >= fixed):
+            continue
         fixing.append((fixed, advisory["ghsa_id"], advisory.get("html_url", "")))
     if not fixing:
         return None
@@ -163,19 +241,16 @@ def pick(tool, repo, pinned, releases, advisories):
                   if ver[0] == installed[0] and ver >= lower_bound]
     candidates.sort()
     for candidate, tag, date, url in candidates:
-        # Do not replace a verified vulnerability with another known one.
-        unknown = False
         safe = True
-        for entry, advisory in all_entries:
-            status = affected(candidate, entry.get("vulnerable_version_range"))
+        for entry, advisory, patch_map, fixed in entries:
+            status = advisory_affected(candidate, entry.get("vulnerable_version_range"), patch_map)
             if status is None:
-                unknown = True
-                break
-            if status:
+                raise ValueError(f"cannot validate range for {advisory['ghsa_id']}")
+            # The version can be safe either by not matching the known
+            # vulnerable range or by explicitly meeting its patched version.
+            if status and (fixed is None or candidate < fixed):
                 safe = False
                 break
-        if unknown:
-            raise ValueError("cannot validate all published direct-advisory ranges")
         if safe:
             return {
                 "tool": tool,
@@ -192,7 +267,7 @@ def pick(tool, repo, pinned, releases, advisories):
                 "major_change": False,
                 "cooldown_bypassed": True,
             }
-    return None  # Fixed only by another major version or not yet stably released.
+    return None  # No current-major stable release resolving all known risks.
 
 
 def github_list(url):
@@ -323,9 +398,6 @@ def main(argv):
     if args.command == "plan":
         pins = toolchain.read_pins(os.path.join(REPO_ROOT, "toolchain.env"))
         result = plan(pins,
-                      # Share the ordinary monitor's Trivy release fallback:
-                      # security planning must not independently fail on the
-                      # same cross-repository GitHub API 403.
                       toolchain.github_releases,
                       tool_advisories)
         with open(args.out, "w", encoding="utf-8") as handle:

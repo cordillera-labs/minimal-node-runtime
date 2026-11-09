@@ -95,6 +95,87 @@ class Selection(unittest.TestCase):
         self.assertIsNone(sec.pick("buildkit","moby/buildkit","v0.33.1",
                                    [release("v0.34.2")],[entry]))
 
+    def test_cosign_real_combined_major_ranges_and_patched_versions(self):
+        # GHSA-w6c6-c85g-mmv6 has one Go package and TWO independent
+        # vulnerability lines in a single repository-advisory field:
+        #   "<= v3.0.5, <= v2.6.2" / "v3.0.6, v2.6.3".
+        item=advisory("github.com/sigstore/cosign","0.0.0","2.6.3",
+                      "v3.0.6, v2.6.3",ghsa="GHSA-w6c6-c85g-mmv6")
+        item["vulnerabilities"][0]["vulnerable_version_range"]="<= v3.0.5, <= v2.6.2"
+        versions=[release(v) for v in ("v2.6.2","v2.6.3","v2.6.5","v3.0.5","v3.0.6")]
+        self.assertEqual(sec.pick("cosign","sigstore/cosign","v2.6.1",versions,[item])["to"],"v2.6.3")
+        self.assertIsNone(sec.pick("cosign","sigstore/cosign","v2.6.3",versions,[item]))
+        self.assertEqual(sec.pick("cosign","sigstore/cosign","v3.0.5",versions,[item])["to"],"v3.0.6")
+        self.assertIsNone(sec.pick("cosign","sigstore/cosign","v3.0.6",versions,[item]))
+
+    def test_cosign_combined_lines_and_later_v2_security_patch(self):
+        earlier=advisory("github.com/sigstore/cosign","0.0.0","2.6.3",
+                         "v3.0.6, v2.6.3",ghsa="GHSA-w6c6-c85g-mmv6")
+        earlier["vulnerabilities"][0]["vulnerable_version_range"]="<= v3.0.5, <= v2.6.2"
+        later=advisory("github.com/sigstore/cosign/v2","0.0.0","2.6.5",
+                       "v2.6.5",ghsa="GHSA-fx35-mq7g-6g98")
+        versions=[release(v) for v in ("v2.6.3","v2.6.4","v2.6.5","v3.1.4")]
+        result=sec.pick("cosign","sigstore/cosign","v2.6.1",versions,[earlier,later])
+        self.assertEqual(result["to"],"v2.6.5")
+        self.assertEqual(result["advisories"],["GHSA-fx35-mq7g-6g98","GHSA-w6c6-c85g-mmv6"])
+
+    def test_malformed_multi_major_ranges_remain_fail_closed(self):
+        item=advisory("github.com/sigstore/cosign","0.0.0","2.6.3","v3.0.6, v2.6.3")
+        for rng in (">=v3.0.0, <v3.0.6, <=v2.6.2",
+                    "<= v3.0.5, <= v3.0.4", "<= v3.0.5, <=v2.6.x",
+                    "<= v3.0.5, arbitrary <= v2.6.2"):
+            item["vulnerabilities"][0]["vulnerable_version_range"]=rng
+            with self.subTest(rng=rng), self.assertRaisesRegex(ValueError,"unparseable"):
+                sec.pick("cosign","sigstore/cosign","v2.6.1",[release("v2.6.3")],[item])
+        item["vulnerabilities"][0]["vulnerable_version_range"]="<=v3.0.5, <=v2.6.2"
+        item["vulnerabilities"][0]["patched_versions"]="v2.6.3, v2.6.4"
+        with self.assertRaisesRegex(ValueError,"ambiguous patched"):
+            sec.pick("cosign","sigstore/cosign","v2.6.1",[release("v2.6.4")],[item])
+
+    def test_buildx_real_stale_range_null_patch_and_new_fix(self):
+        # GHSA-gwr2-q96m-6682 still claims ">=0.21.0" and reports
+        # patched_versions=null, but its own Patches section states v0.37.2.
+        old=advisory("github.com/docker/buildx","0.21.0","0.37.2",None,
+                     ghsa="GHSA-gwr2-q96m-6682",cve_id="CVE-2026-93325",
+                     description="### Impact\nUntrusted bake.\n### Patches\n\n"
+                                 "The issue has been fixed in version v0.37.2.\n"
+                                 "### Workarounds\nUse trusted definitions.")
+        old["vulnerabilities"][0]["vulnerable_version_range"]=">=0.21.0"
+        recent=advisory("github.com/docker/buildx","0.10.0","0.38.1","v0.38.1+",
+                        ghsa="GHSA-xg6v-cv2h-2w5h",cve_id="CVE-2026-121541")
+        recent["vulnerabilities"][0]["package"]={"ecosystem":"other","name":None}
+        recent["vulnerabilities"][0]["vulnerable_version_range"]="<=v0.38.0"
+        versions=[release(v) for v in ("v0.37.2","v0.38.0","v0.38.1","v0.38.2")]
+        # The old advisory is *already fixed*; it must not prevent the new fix.
+        result=sec.pick("buildx","docker/buildx","v0.37.2",versions,[old,recent])
+        self.assertEqual(result["to"],"v0.38.1")
+        self.assertEqual(result["advisories"],["GHSA-xg6v-cv2h-2w5h"])
+        # A pin that predates v0.37.2 still needs that earlier patch.
+        self.assertEqual(sec.pick("buildx","docker/buildx","v0.37.1",versions,[old])["to"],"v0.37.2")
+        self.assertIsNone(sec.pick("buildx","docker/buildx","v0.37.2",versions,[old]))
+
+    def test_missing_patch_requires_precise_patches_section_and_cve(self):
+        item=advisory("github.com/docker/buildx","0.21.0","0.37.2",None,
+                      ghsa="GHSA-gwr2-q96m-6682",cve_id="CVE-2026-93325",
+                      description="### Impact\nNo patch is recorded.\n"
+                                  "### Patches\nUnclear status.\n")
+        item["vulnerabilities"][0]["vulnerable_version_range"]=">=0.21.0"
+        cases=[
+            "The issue has been fixed in version v0.37.2.", # no Patches heading
+            "### Impact\nThe issue has been fixed in version v0.37.2.",
+            "### Patches\nThe issue may have been fixed in version v0.37.2.",
+            "### Patches\nThe issue has been fixed in version v0.37.2.\n"
+            "The issue has been fixed in version v0.37.3.",
+        ]
+        for description in cases:
+            item["description"]=description
+            with self.subTest(description=description), self.assertRaisesRegex(ValueError,"missing valid patched"):
+                sec.pick("buildx","docker/buildx","v0.37.1",[release("v0.37.2")],[item])
+        item["description"]="### Patches\nThe issue has been fixed in version v0.37.2."
+        item["cve_id"]=None
+        with self.assertRaisesRegex(ValueError,"missing valid patched"):
+            sec.pick("buildx","docker/buildx","v0.37.1",[release("v0.37.2")],[item])
+
     def test_cosign_uses_patched_major_2_not_major_3(self):
         releases=[release("v3.1.4"),release("v2.6.5"),release("v2.6.4")]
         entries=[advisory("github.com/sigstore/cosign/v2","2.6.0","2.6.5","2.6.5")]
