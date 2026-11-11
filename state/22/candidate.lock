@@ -2,17 +2,17 @@
 # The hourly update workflow writes this file after a successful publish.
 # Edit it by hand only to roll back, and expect the next run to re-evaluate it.
 CHANNEL=candidate
-EVALUATED_AT=2026-11-09T00:54:40Z
+EVALUATED_AT=2026-11-11T21:57:43Z
 BUILD_DEFINITION_SHA256=26c75a57a00e86d6b30379a581ededd1a7429c1a95d99bec5c6faa43f0130346
 BUILD_DEFINITION_ACCEPTED=repository change
-SOURCE_DATE_EPOCH=1792540800
+SOURCE_DATE_EPOCH=1794355200
 HELPER_IMAGE=docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 HELPER_IMAGE_RELEASED=2026-11-04T21:23:39Z
 HELPER_IMAGE_ACCEPTED=initial
-NODE_VERSION=22.23.4
-NODE_SHA256=b8492284c76a54baf58d61668dd0e41ee0fc98adabf9503d30f05d08f55b4406
-NODE_RELEASED=2026-10-20
-NODE_ACCEPTED=initial
+NODE_VERSION=22.23.5
+NODE_SHA256=c54118104acc524633b5abe106bbf44a53126ec8b4e5fa105cb92b5d7de8a1a1
+NODE_RELEASED=2026-11-11
+NODE_ACCEPTED=security (nodejs.org marks 22.23.5 as security releases)
 DEB_BASE_FILES_VERSION=13.8+deb13u7
 DEB_BASE_FILES_SUITE=trixie
 DEB_BASE_FILES_URL=https://snapshot.debian.org/file/caf8f6f49912fa5fd1d178d4a2f6ff41a6160432
@@ -50,8 +50,8 @@ DEB_LIBSTDCXX6_SHA256=ab1fa05837aa7a92aae748fd07a18a35f7d18bb4a71c4724fe2bbf0e32
 DEB_LIBSTDCXX6_RELEASED=2026-07-09T00:00:00Z
 DEB_LIBSTDCXX6_ACCEPTED=initial
 BREAKING_PACKAGES=node
-PUBLISHED_DIGEST=sha256:47f64523bf1fb8c3bf60e4fe762f849a88eb2f77d62a2ddecae942bed0d5a553
-PUBLISHED_TAG=22.23.4-trixie-2c830726a2af
-PUBLISHED_COMMIT=26428eca512f48adfffafd0ae6472ee1c88a4dd2
-PUBLISHED_RELEASE=https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/22.23.4-trixie-2c830726a2af
-PUBLISHED_RUN=https://github.com/cordillera-labs/minimal-node-runtime/actions/runs/42542677917
+PUBLISHED_DIGEST=sha256:5bd9f77148301dc2bd60057fdf53bea22b1ba14014e71d75dbbfaabf012a403e
+PUBLISHED_TAG=22.23.5-trixie-5d9e08486661
+PUBLISHED_COMMIT=ddafb7e58f059731febf7faf8b50d2347fba93d7
+PUBLISHED_RELEASE=https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/22.23.5-trixie-5d9e08486661
+PUBLISHED_RUN=https://github.com/cordillera-labs/minimal-node-runtime/actions/runs/43107506154
