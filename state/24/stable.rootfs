@@ -10,6 +10,10 @@ layout	lib	link:usr/lib
 layout	lib64	link:usr/lib64
 node	nodejs/LICENSE	file
 node	nodejs/bin/node	file
+node	nodejs/lib/ca-distrust.cjs	file
+node	nodejs/lib/ca-image-exclusions.txt	file
+node	nodejs/lib/ca-image-filter.cjs	file
+node	nodejs/lib/ca-preload.cjs	file
 generated	tmp	dir
 base-files	usr/lib/os-release	file
 libc6	usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2	file
