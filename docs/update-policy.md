@@ -277,6 +277,7 @@ edits the issue body, which sends no notification.
 | `toolchain-update` | a tool pin has a stable upstream release past the cooldown | the pin reaches that release |
 | `toolchain-security-fault` | a tool's published advisory or release feed could not be read safely | a later observation successfully reads all tool feeds |
 | `toolchain-security-failure` | an automated GHSA-backed security PR, CI, merge or image dispatch fails | maintainer review / successful retry |
+| `toolchain-routine-failure` | a routine pin PR cannot be created, validated or merged | maintainer review / successful retry |
 | `candidate` | a breaking build is published to `<line>-candidate` | the candidate is promoted |
 | `breaking` | a breaking security fix is published to stable | by a maintainer |
 | `reproducibility` | the weekly rebuild gives another digest, or the registry does not serve it | a later weekly run succeeds |
@@ -289,9 +290,39 @@ compares each pin with the latest stable release of its tool on GitHub
 (`aquasecurity/trivy`, `moby/buildkit`, `docker/buildx`, `sigstore/cosign`).
 A draft, a prerelease and a tag that is not `vMAJOR.MINOR.PATCH` never count.
 
-A newer **nonsecurity** release is eligible when its GitHub release is
-`COOLDOWN_DAYS` old. The toolchain job opens one `toolchain-update` issue per
-eligible pin and never changes it. A person may review and adopt those updates.
+### Automatic routine updates after the cooldown
+
+A newer **routine** release becomes eligible when its upstream GitHub release
+is at least `COOLDOWN_DAYS` (seven days) old. The existing hourly `toolchain`
+job keeps one `toolchain-update` issue per eligible tool, and also invokes
+`scripts/toolchain-routine.sh` to advance a `toolchain-routine-auto` PR or
+propose the next eligible pin. This is **not** another scheduled workflow.
+
+The planner rejects malformed release metadata, unknown tool pins, stale
+version claims, unfinished cooldowns and noncanonical release URLs. It never
+treats a lookup fault as permission to update. Each PR changes exactly one
+`toolchain.env` pin; BuildKit and Cosign image pins must carry a registry
+verified immutable tag-plus-SHA-256 digest. BuildKit and Buildx are always
+separate proposals. The pin and release notes remain visible in the update
+issue and PR.
+
+Because a PR opened by `GITHUB_TOKEN` does not start `pull_request` CI, the
+job explicitly dispatches `ci.yml` on the new branch. A subsequent hourly
+observation requires successful **full CI on exactly that head SHA**, a
+single-file/single-pin diff, a trusted bot branch, and the same `main` commit
+as the one CI tested. Only then can a **same-major** update squash-merge,
+without administrator bypass, and explicitly dispatch `update.yml` to rebuild
+and publish. A missing/failed CI run, stale base or merge-protection error
+leaves the PR open and creates a `toolchain-routine-failure` issue.
+
+**Major upgrades**, including Cosign v2 → v3, are proposed with their own PR
+and receive the same CI, but **never auto-merge**; a maintainer must review
+compatibility and merge them. One same-major PR at a time limits expensive
+parallel reproducibility builds. A pending major PR does not block other
+eligible tool updates. The security updater takes precedence over this lane;
+both mutation jobs share a concurrency group. If a security PR changes `main`
+while routine CI runs, that routine PR cannot auto-merge without fresh
+validation. Repository Actions permissions must allow bot-created PRs.
 
 ### Automatic, advisory-backed security fixes
 
@@ -405,10 +436,10 @@ fixes found **only** in dependencies or inferred solely from release notes
 remain manual. **Major upgrades** (such as Cosign 2 → 3) also stay manual.
 These restrictions trade some speed for supply-chain protection.
 
-For each nonsecurity tool with an eligible release, the existing hourly
-`toolchain-update` issue remains the manual-review queue. Image pins must
-always update tag and digest together; BuildKit and Buildx should never change
-in the same PR.
+For routine releases, the hourly `toolchain-update` issue is a
+persistent discovery record. The routine lane opens and validates PRs
+automatically; only major-version upgrades require a manual merge. Image pins
+always update tag and digest together, and BuildKit and Buildx are isolated.
 
 When the normal GitHub release lookup and any validated fallback fail, or
 a pin cannot be read, the job reports a fault in
