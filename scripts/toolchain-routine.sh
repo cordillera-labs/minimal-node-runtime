@@ -47,12 +47,14 @@ while IFS= read -r item; do
     head=$(jq -er .headRefOid <<<"$item")
     author=$(jq -er '.author.login' <<<"$item")
     base=$(jq -er .baseRefName <<<"$item")
-    draft=$(jq -er .isDraft <<<"$item")
-    if [[ ! "$branch" =~ ^routine/toolchain-(buildkit|buildx|cosign|trivy)-(v[0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$ ]] ||
-            [[ "$author" != 'github-actions[bot]' || "$base" != main ]]; then
-        failure "Unexpected PR #$number has the routine bot label (head $branch, author $author)."
+    draft=$(jq -r .isDraft <<<"$item")
+    if [[ ! "$branch" =~ ^routine/toolchain-(buildkit|buildx|cosign|trivy)-(v[0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$ ]]; then
+        failure "Unexpected PR #$number head branch $branch has the routine bot label."
     fi
     tool=${BASH_REMATCH[1]}
+    if [[ "$author" != 'github-actions[bot]' || "$base" != main ]]; then
+        failure "Unexpected PR #$number author $author or base $base."
+    fi
     skip="${skip:+$skip,}$tool"
     if [[ "$(gh pr diff "$number" --name-only)" != toolchain.env ]]; then
         failure "PR #$number modifies files other than toolchain.env."
@@ -129,7 +131,7 @@ fi
 tool=$(jq -er .tool "$work/choice.json")
 old=$(jq -er .from "$work/choice.json")
 new=$(jq -er .to "$work/choice.json")
-major=$(jq -er .major_change "$work/choice.json")
+major=$(jq -r .major_change "$work/choice.json")
 git fetch --quiet origin main
 git switch -c "routine/toolchain-$tool-$new-$GITHUB_RUN_ID" origin/main
 branch=$(git branch --show-current)
@@ -161,7 +163,7 @@ git push --set-upstream origin "$branch" ||
 {
     echo "Automatic seven-day cooldown toolchain upgrade for **$tool**: \`$old\` → \`$new\`."
     echo
-    jq -r '"Release: " + .release_url + "\\nReleased: " + .released_at' "$work/choice.json"
+    jq -r '"Release: " + .release_url + "\nReleased: " + .released_at' "$work/choice.json"
     echo
     if [[ "$major" == true ]]; then
         echo '**Major upgrade — manual review and merge required.**'
