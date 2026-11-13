@@ -266,7 +266,7 @@ class Rendering(unittest.TestCase):
         result = toolchain.evaluate("trivy", "aquasecurity/trivy", "v0.74.0", TRIVY_RELEASES, NOW)
         self.assertEqual(toolchain.issue_title(result), "Toolchain pin update available: trivy")
         body = toolchain.issue_body(result)
-        for text in ("v0.74.0", "v0.76.1", "v0.76.2", "2026-11-12", "never change `toolchain.env`"):
+        for text in ("v0.74.0", "v0.76.1", "v0.76.2", "2026-11-12", "routine updater proposes"):
             self.assertIn(text, body)
 
     def test_summary_keeps_a_fault_apart_from_current(self):
