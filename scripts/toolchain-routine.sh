@@ -89,6 +89,10 @@ while IFS= read -r item; do
         continue
     fi
     if [[ "$conclusion" != success ]]; then
+        if [[ "$major" == true ]]; then
+            echo "::warning::Major-version PR #$number CI finished with $conclusion; manual review required."
+            continue  # Do not starve unrelated tool updates behind a manual major.
+        fi
         failure "PR #$number exact-head full CI finished with $conclusion."
     fi
     if [[ "$major" == true ]]; then
