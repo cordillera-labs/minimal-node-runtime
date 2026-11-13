@@ -5,10 +5,9 @@
 #
 #   lines      list the lines from state/.
 #   line       line.yml, once per line.
-#   toolchain  compare the pins in toolchain.env with the latest upstream
-#              releases and report an eligible newer release as an issue. It
-#              changes no file and publishes nothing, and no other job waits
-#              for it.
+#   toolchain  compare pins with cooldown-eligible upstream releases, report
+#              issues, and advance one pin-only routine PR through full CI.
+#              This is independent of the line publication jobs.
 #   keepalive  commit a heartbeat when main has been quiet.
 #
 # Events made with GITHUB_TOKEN start no workflow runs, so nothing here relies
@@ -76,16 +75,20 @@ jobs:
       line: ${{ matrix.line }}
 
   toolchain:
-    # Dependabot does not read toolchain.env. This opens one issue per tool pin
-    # that has a stable upstream release at least COOLDOWN_DAYS old, and closes
-    # it when the pin catches up. A person changes the pin in a pull request.
-    # A lookup fault is a run summary entry and an annotation, never an issue,
-    # and it leaves the tool's issue as it was.
+    # Dependabot does not read toolchain.env. Report every eligible pin, then
+    # advance at most one bot PR. The security fast path has priority and uses
+    # the same concurrency group; normal publishing remains independent.
+    # Lookup faults never authorize pin changes.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    concurrency:
+      group: toolchain-security
+      cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
+      actions: write
+      pull-requests: write
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
@@ -95,7 +98,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          persist-credentials: true # zizmor: ignore[artipacked] push trusted pin-only PR branches
 
       - name: Compare the pins with upstream
         id: check
@@ -122,6 +125,9 @@ jobs:
                 ;;
             esac
           done
+
+      - name: Advance routine toolchain PRs after the release cooldown
+        run: bash scripts/toolchain-routine.sh "$RUNNER_TEMP/toolchain.json"
 
   keepalive:
     # The record commits keep the scheduled workflows active (GitHub disables
