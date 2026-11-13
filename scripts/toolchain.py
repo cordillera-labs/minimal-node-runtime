@@ -5,13 +5,13 @@
 
 Dependabot does not read toolchain.env, so a pin goes stale without a signal.
 This script reads each pin and the GitHub releases of its tool, and writes one
-result per tool to --out. It decides nothing about the pins: it never edits
-toolchain.env and publishes nothing. A person reviews the change and merges it.
+result per tool to --out. It never edits toolchain.env. The separate routine
+orchestrator proposes eligible pins as single-file pull requests, runs full CI
+and only automatically merges same-major updates after verification.
 
 A newer stable release is eligible once it is COOLDOWN_DAYS old
 (scripts/policy.py), the same cooldown the update policy applies to every other
-input. A security update has no fast path here, because a tool is part of the
-build definition and a person reviews every change to it.
+input. Independently, the GHSA-backed security lane can bypass this cooldown.
 
 Each result has a state:
   current   the pin is at or above the newest stable release.
@@ -281,10 +281,10 @@ def issue_body(result):
         lines.append(f"- Newer, still in the cooldown: `{pending['tag']}`, eligible from {pending['cooldown_ends']}")
     lines += [
         "",
-        "The workflows never change `toolchain.env`. To adopt the release, review its notes and open a",
-        "pull request that changes the pin (for an image pin, the tag and the digest together). The file",
-        "is part of the build definition, so the next update run rebuilds with the new pin.",
-        "A BuildKit or buildx change can change the image digest, so change those pins on their own.",
+        "The hourly routine updater proposes one-pin pull requests after this cooldown.",
+        "Same-major updates receive full CI and can merge automatically; major changes require",
+        "manual review. Image pins change tag and immutable digest together. BuildKit and",
+        "buildx are updated separately, since they can change reproducible image digests.",
         "",
         "This issue closes when the pin reaches the eligible release.",
     ]
