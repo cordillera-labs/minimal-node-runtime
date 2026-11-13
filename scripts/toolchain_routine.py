@@ -32,6 +32,7 @@ def plan(report, pins, skip=(), now=None):
     if not isinstance(report, dict) or not isinstance(report.get("tools"), list):
         raise ValueError("missing toolchain monitor report")
     now = now or datetime.datetime.now(datetime.timezone.utc)
+    skip = frozenset(skip)
     if any(name not in ORDER for name in skip):
         raise ValueError("unknown skipped tool")
     rows = [r for r in report["tools"] if isinstance(r, dict) and r.get("tool") in ORDER]
@@ -80,7 +81,7 @@ def changed_pin(base, candidate, name):
     if name not in ORDER:
         raise ValueError("tool not allowlisted")
     key = next(k for k, (tool, _, _) in toolchain.TOOLS.items() if tool == name)
-    base_pins = toolchain.read_pins_from_text(base) if hasattr(toolchain, "read_pins_from_text") else parse_pins(base)
+    base_pins = parse_pins(base)
     new_pins = parse_pins(candidate)
     if set(base_pins) != set(new_pins):
         raise ValueError("pin keys changed")
