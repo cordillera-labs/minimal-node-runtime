@@ -1,0 +1,44 @@
+name: Open, update or close a scan issue
+description: >-
+  Keep one GitHub issue in step with a scheduled scan: a failure opens it or
+  comments on it, a pass closes it, so an open issue always means the latest
+  scan failed. The message links the run and names no findings; the log holds
+  those. The caller's job needs `issues: write` and should run no repository code.
+
+inputs:
+  result:
+    description: The scan job's result (needs.<job>.result).
+    required: true
+  title:
+    description: Issue title; it is also how the open issue is found.
+    required: true
+  token:
+    description: Token with issues:write (github.token).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Open, update or close the issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        SCAN_RESULT: ${{ inputs.result }}
+        TITLE: ${{ inputs.title }}
+      run: |
+        set -euo pipefail
+        run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        existing="$(gh issue list --state open --limit 100 --json number,title | jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' | head -n 1)"
+        if [[ "$SCAN_RESULT" == success ]]; then
+          if [[ -n "$existing" ]]; then
+            gh issue close "$existing" --comment "The scan passed. Run: $run_url"
+          fi
+          exit 0
+        fi
+        message="The scheduled scan failed. This may be a High/Critical advisory, a vulnerable Node runtime, or a scanner or infrastructure fault; read the job log before treating it as a confirmed vulnerability. Run: $run_url"
+        if [[ -n "$existing" ]]; then
+          gh issue comment "$existing" --body "$message"
+        else
+          gh issue create --title "$TITLE" --body "$message"
+        fi

@@ -1,0 +1,39 @@
+name: Scan an image for vulnerabilities
+description: >-
+  Scan a local Docker image for High and Critical vulnerabilities with a
+  hash-pinned Trivy, and optionally check that the Node it ships meets a
+  minimum version (Trivy does not attribute Node-core CVEs to a standalone
+  Node binary). Exit 1 is a finding and 69 a scanner fault; both fail.
+  The image must already be in the runner's Docker daemon; pull it first.
+
+inputs:
+  image-ref:
+    description: Local image reference to scan.
+    required: true
+  min-node-version:
+    description: >-
+      Minimum safe Node version as MAJOR.MINOR.PATCH (for example 22.22.2). The
+      image's Node major must equal it exactly. Leave empty to skip the check.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Verify the Node runtime security baseline
+      if: ${{ inputs.min-node-version != '' }}
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        MIN_NODE: ${{ inputs.min-node-version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        bash "$ACTION_PATH/container-node-runtime-check.test.sh"
+        bash "$ACTION_PATH/container-node-runtime-check.sh" "$IMAGE_REF" "$MIN_NODE"
+
+    - name: Scan image vulnerabilities (high and critical)
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "$ACTION_PATH/trivy-image-scan.sh" "$IMAGE_REF"

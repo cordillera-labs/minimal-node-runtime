@@ -1,0 +1,40 @@
+name: Trigger a Coolify deploy
+description: >-
+  POST to a Coolify resource's deploy webhook. Fails when either credential is
+  empty, so a missing secret never reads as a deploy. Runs no repository code:
+  use it in a job with no checkout so the token never meets application code.
+
+inputs:
+  webhook:
+    description: The resource's Deploy Webhook URL.
+    required: true
+  token:
+    description: A Coolify API token with deploy permission.
+    required: true
+  description:
+    description: What is being deployed, for the log (image and digest).
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Trigger the Coolify deploy
+      shell: bash
+      env:
+        COOLIFY_DEPLOY_WEBHOOK: ${{ inputs.webhook }}
+        COOLIFY_API_TOKEN: ${{ inputs.token }}
+        WHAT: ${{ inputs.description }}
+      run: |
+        set -euo pipefail
+        if [ -z "$COOLIFY_DEPLOY_WEBHOOK" ] || [ -z "$COOLIFY_API_TOKEN" ]; then
+          echo "::error::The Coolify webhook or token is unset; the image is published but nothing was deployed"
+          exit 1
+        fi
+        [[ "$COOLIFY_DEPLOY_WEBHOOK" =~ ^https:// ]] || { echo "::error::the Coolify webhook must be an https URL"; exit 1; }
+        echo "Deploying ${WHAT:-the published image}"
+        # Coolify's deploy endpoint takes POST only (a GET returns 405).
+        # --data '' makes it a POST with an empty body.
+        curl --fail-with-body --silent --show-error --max-time 60 --proto '=https' \
+          --data '' \
+          -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+          "$COOLIFY_DEPLOY_WEBHOOK"

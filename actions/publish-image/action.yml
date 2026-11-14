@@ -1,0 +1,63 @@
+name: Publish a scanned image to GHCR
+description: >-
+  Tag a local, already-scanned image as `sha-<commit>` (immutable, the rollback
+  handle) and as a moving tag, push both to GHCR, and output the pushed digest.
+  The caller's job needs `packages: write`, and should run only on merged code.
+
+inputs:
+  local-ref:
+    description: Local image reference to publish.
+    required: true
+  image-name:
+    description: Registry repository, for example ghcr.io/ORG/NAME.
+    required: true
+  moving-tag:
+    description: Tag that moves to the newest published image.
+    default: release
+  token:
+    description: Token with packages:write (github.token).
+    required: true
+
+outputs:
+  digest:
+    description: Digest of the pushed image (sha256:...).
+    value: ${{ steps.push.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Log in to GHCR
+      uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+
+    # The sha tag goes first: the moving tag only moves once the immutable tag
+    # exists, and both name the same digest.
+    - name: Push the scanned image
+      id: push
+      shell: bash
+      env:
+        LOCAL_REF: ${{ inputs.local-ref }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+        MOVING_TAG: ${{ inputs.moving-tag }}
+      run: |
+        set -euo pipefail
+        [[ "$IMAGE_NAME" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]] || { echo "::error::image-name must be a ghcr.io repository"; exit 1; }
+        sha_ref="$IMAGE_NAME:sha-$GITHUB_SHA"
+        moving_ref="$IMAGE_NAME:$MOVING_TAG"
+        docker tag "$LOCAL_REF" "$sha_ref"
+        docker tag "$LOCAL_REF" "$moving_ref"
+        docker push "$sha_ref"
+        docker push "$moving_ref"
+        digest="$(docker image inspect "$sha_ref" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -m1 "^$IMAGE_NAME@" | cut -d@ -f2)"
+        [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::could not read the pushed digest"; exit 1; }
+        echo "digest=$digest" >> "$GITHUB_OUTPUT"
+        {
+          echo "### Published"
+          echo "- \`$sha_ref\`"
+          echo "- \`$moving_ref\`"
+          echo "- digest \`$digest\`"
+        } >> "$GITHUB_STEP_SUMMARY"
+        docker image rm -f "$sha_ref" "$moving_ref" > /dev/null 2>&1 || true
