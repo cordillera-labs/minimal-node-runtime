@@ -104,12 +104,48 @@ while IFS= read -r item; do
         continue
     fi
 
-    # Reject CI performed against an obsolete main, including an intervening
-    # emergency toolchain update. The PR stays open rather than silently using
-    # tests from a different build definition.
+    # Never merge CI tested against an older main. Safely replay the verified
+    # single-pin commit onto the new main and dispatch fresh full CI. This is
+    # common because the independent trust-state observer commits to main.
     current_main=$(gh api "repos/$GH_REPO/branches/main" --jq .commit.sha)
-    [[ "$parent" == "$current_main" ]] ||
-        failure "PR #$number CI passed against obsolete main ($parent, now $current_main). Rebase and rerun CI."
+    if [[ "$parent" != "$current_main" ]]; then
+        echo "PR #$number has obsolete base $parent; safely refresh to $current_main."
+        old_version=$(jq -er .from "$work/verify.json")
+        new_version=$(jq -er .to "$work/verify.json")
+        git fetch --quiet origin main "$branch" ||
+            failure "Cannot fetch current main or routine PR #$number."
+        git switch --detach origin/main ||
+            failure "Cannot switch to current main for PR #$number."
+        git cherry-pick --no-commit "$head" ||
+            failure "PR #$number pin conflicts with newer main; cannot refresh automatically."
+        [[ "$(git diff --cached --name-only)" == toolchain.env ]] ||
+            failure "Refreshed PR #$number changes files other than toolchain.env."
+        git show HEAD:toolchain.env > "$work/refreshed-base.env" ||
+            failure "Cannot read refreshed base for PR #$number."
+        git show :toolchain.env > "$work/refreshed-proposed.env" ||
+            failure "Cannot read refreshed pin for PR #$number."
+        python3 scripts/toolchain_routine.py verify --tool "$tool" \
+            --base "$work/refreshed-base.env" \
+            --candidate "$work/refreshed-proposed.env" > "$work/refreshed-verify.json" ||
+            failure "Refreshed PR #$number is not the same single-pin upgrade."
+        if [[ "$(jq -r .from "$work/refreshed-verify.json")" != "$old_version" ||
+                "$(jq -r .to "$work/refreshed-verify.json")" != "$new_version" ]]; then
+            failure "Refreshed PR #$number would change the approved pin upgrade."
+        fi
+        # Preserve bot authorship and only replace the branch if nobody has
+        # touched its exact previously validated head (force-with-lease).
+        git config user.name 'github-actions[bot]'
+        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        git commit -m "Routine: pin $tool $old_version to $new_version" ||
+            failure "Cannot commit refreshed routine pin for PR #$number."
+        git push --force-with-lease="refs/heads/$branch:$head" \
+            origin "HEAD:refs/heads/$branch" ||
+            failure "Routine PR #$number branch changed during refresh."
+        gh workflow run ci.yml --ref "$branch" ||
+            failure "Refreshed PR #$number but could not dispatch fresh CI."
+        echo "Refreshed PR #$number and dispatched fresh full CI. No merge without the new exact-head result."
+        exit 0
+    fi
     actual=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
     [[ "$actual" == "$head" ]] || failure "PR #$number head changed after validation."
     gh pr merge "$number" --squash --delete-branch --match-head-commit "$head" ||
