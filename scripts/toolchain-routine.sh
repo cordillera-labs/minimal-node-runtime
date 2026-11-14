@@ -52,7 +52,11 @@ while IFS= read -r item; do
         failure "Unexpected PR #$number head branch $branch has the routine bot label."
     fi
     tool=${BASH_REMATCH[1]}
-    if [[ "$author" != 'github-actions[bot]' || "$base" != main ]]; then
+    # GitHub GraphQL (gh pr list) reports the Actions app as app/github-actions,
+    # while REST (gh pr view) reports github-actions[bot]. Both name the same
+    # trusted GitHub Actions identity; accept only these exact spellings.
+    if [[ "$author" != 'github-actions[bot]' && "$author" != 'app/github-actions' ]] ||
+            [[ "$base" != main ]]; then
         failure "Unexpected PR #$number author $author or base $base."
     fi
     skip="${skip:+$skip,}$tool"
