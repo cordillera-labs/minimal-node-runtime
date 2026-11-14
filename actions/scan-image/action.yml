@@ -5,6 +5,7 @@ description: >-
   minimum version (Trivy does not attribute Node-core CVEs to a standalone
   Node binary). Exit 1 is a finding and 69 a scanner fault; both fail.
   The image must already be in the runner's Docker daemon; pull it first.
+  Optionally keeps one GitHub issue in step with the result (for scheduled scans).
 
 inputs:
   image-ref:
@@ -15,11 +16,23 @@ inputs:
       Minimum safe Node version as MAJOR.MINOR.PATCH (for example 22.22.2). The
       image's Node major must equal it exactly. Leave empty to skip the check.
     default: ''
+  issue-title:
+    description: >-
+      Set this (with issue-token) for scheduled scans: a failed scan opens an
+      issue with this title or comments on the open one, and a passing scan
+      closes it. Leave empty (the default) for pull-request gates.
+    default: ''
+  issue-token:
+    description: >-
+      Token with issues:write (github.token). Only the reporting step receives
+      it. The calling job needs `issues: write` and should run no repository code.
+    default: ''
 
 runs:
   using: composite
   steps:
     - name: Verify the Node runtime security baseline
+      id: node
       if: ${{ inputs.min-node-version != '' }}
       shell: bash
       env:
@@ -32,8 +45,37 @@ runs:
         bash "$ACTION_PATH/container-node-runtime-check.sh" "$IMAGE_REF" "$MIN_NODE"
 
     - name: Scan image vulnerabilities (high and critical)
+      id: trivy
       shell: bash
       env:
         IMAGE_REF: ${{ inputs.image-ref }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "$ACTION_PATH/trivy-image-scan.sh" "$IMAGE_REF"
+
+    # Runs after a failed scan too, then the action still fails because the
+    # scan step did. A skipped Node check (no minimum given) counts as passing.
+    - name: Open, update or close the scan issue
+      if: ${{ always() && inputs.issue-title != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.issue-token }}
+        GH_REPO: ${{ github.repository }}
+        TITLE: ${{ inputs.issue-title }}
+        NODE_OUTCOME: ${{ steps.node.outcome }}
+        TRIVY_OUTCOME: ${{ steps.trivy.outcome }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$GH_TOKEN" ]]; then
+          echo "::error::issue-title is set but issue-token is empty"
+          exit 1
+        fi
+        bash "$ACTION_PATH/report-issue.test.sh"
+        if [[ "$NODE_OUTCOME" == cancelled || "$TRIVY_OUTCOME" == cancelled ]]; then
+          SCAN_RESULT=cancelled
+        elif [[ "$NODE_OUTCOME" =~ ^(success|skipped)$ && "$TRIVY_OUTCOME" == success ]]; then
+          SCAN_RESULT=success
+        else
+          SCAN_RESULT=failure
+        fi
+        SCAN_RESULT="$SCAN_RESULT" bash "$ACTION_PATH/report-issue.sh"

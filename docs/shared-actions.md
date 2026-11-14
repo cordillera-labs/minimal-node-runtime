@@ -1,7 +1,7 @@
 # Shared CI actions for app images
 
 Composite actions under `actions/` give any application repository the same
-build, scan and publish gate for a container image (the shared part stops at publication; deploy triggers, rollout and issue reporting are each repository's own) that runs on this runtime.
+build, scan and publish gate for a container image (the shared part stops at publication; deploy triggers and rollout are each repository's own) that runs on this runtime.
 They exist so a scanner pin, a fix to the dependency audit, or a policy change
 is made once. This repository is public: the actions hold no project names,
 paths, hostnames or secrets, and take everything as inputs.
@@ -10,7 +10,7 @@ paths, hostnames or secrets, and take everything as inputs.
 | --- | --- |
 | `audit-deps` | `pnpm audit` over every tracked `pnpm-lock.yaml`; fails at or above a threshold. Exit 1 is a finding, 69 a fault; a fault never passes. |
 | `build-image` | Builds the Dockerfile for `linux/amd64` and fails if the image holds `.env`, `.env.*` or `.npmrc`. |
-| `scan-image` | Hash-pinned Trivy scan for High and Critical findings, plus an optional minimum-Node-version check (Trivy cannot see Node-core CVEs in a standalone binary). |
+| `scan-image` | Hash-pinned Trivy scan for High and Critical findings, plus an optional minimum-Node-version check (Trivy cannot see Node-core CVEs in a standalone binary). For scheduled scans, `issue-title` and `issue-token` keep one GitHub issue in step with the result: a failure opens it or comments, a pass closes it. |
 | `publish-image` | Pushes `sha-<commit>` and a moving tag to GHCR and outputs the digest. |
 
 ## Using them
@@ -36,7 +36,8 @@ image's own `HEALTHCHECK`.
 - Calling repositories are not recorded here. GitHub's "Used by" graph lists
   public dependents only.
 - The actions take no secrets. `publish-image` receives a token as an input
-  from the caller's own job.
+  from the caller's own job, and `scan-image` takes one only when its issue
+  reporting is on (only that step sees it).
 - The only outbound data is package names and versions to the npm registry
   (what `pnpm install` already sends) and the public Trivy vulnerability DB.
   Source never leaves the runner.
