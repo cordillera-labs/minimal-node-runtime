@@ -1,10 +1,13 @@
 """Regression tests for safe main drift while routine toolchain CI is pending."""
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from toolchain_observation_drift import is_observation_only
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from toolchain_observation_drift import is_observation_only  # noqa: E402
 
 
 class ObservationDriftTests(unittest.TestCase):
