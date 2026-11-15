@@ -31,7 +31,8 @@ jobs:
           python3 -m unittest discover -s tests -v
           node --test tests/ca-distrust.test.cjs
           node --test tests/ca-image-filter.test.cjs
-          shellcheck scripts/*.sh
+          shellcheck scripts/*.sh actions/*/*.sh
+          for t in actions/*/*.test.sh; do bash "$t"; done
 
       - name: Verify current upstream root-store formats
         env:

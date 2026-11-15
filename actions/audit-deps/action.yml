@@ -1,0 +1,40 @@
+name: Audit pnpm dependencies
+description: >-
+  Run `pnpm audit` over every tracked pnpm-lock.yaml root and fail on an
+  advisory at or above a severity threshold. Exit 1 is a finding and 69 is a
+  fault (no network, a registry error, no report); both fail the step, and a
+  fault never reads as a pass. Needs a checkout with the lockfiles tracked by git.
+
+inputs:
+  threshold:
+    description: Lowest blocking severity (low, moderate, high or critical).
+    default: moderate
+  working-directory:
+    description: Repository directory to audit, relative to the workspace.
+    default: .
+  node-version:
+    description: Node version that runs pnpm (any version actions/setup-node accepts).
+    default: '22'
+
+runs:
+  using: composite
+  steps:
+    # The pnpm version comes from the caller's package.json `packageManager`.
+    - name: Set up pnpm
+      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+
+    - name: Set up Node
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Audit every lockfile root
+      shell: bash
+      env:
+        THRESHOLD: ${{ inputs.threshold }}
+        WORKDIR: ${{ inputs.working-directory }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        bash "$ACTION_PATH/dependency-advisory-audit.test.sh"
+        bash "$ACTION_PATH/dependency-advisory-audit.sh" --threshold "$THRESHOLD" "$GITHUB_WORKSPACE/$WORKDIR"

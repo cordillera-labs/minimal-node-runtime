@@ -1,0 +1,27 @@
+name: Build and check an app image
+description: >-
+  Build the Dockerfile in a directory for linux/amd64 and fail if the image
+  carries a .env, .env.* or .npmrc file. Builds with no build arguments and no
+  secrets. Registry logins stay the caller's job.
+
+inputs:
+  image-tag:
+    description: Local tag to give the built image.
+    required: true
+  context:
+    description: Docker build context, relative to the workspace.
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Build the image and assert it holds no env file
+      shell: bash
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        CONTEXT: ${{ inputs.context }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        bash "$ACTION_PATH/container-image-filesystem-check.test.sh"
+        bash "$ACTION_PATH/build-image.sh" "$IMAGE_TAG" "$GITHUB_WORKSPACE/$CONTEXT"
