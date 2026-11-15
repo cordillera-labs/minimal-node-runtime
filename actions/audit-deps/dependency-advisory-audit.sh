@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016,SC2317,SC2329  # the node -e program is deliberately single-quoted; the functions are called indirectly
 #
 # dependency-advisory-audit.sh — run `pnpm audit` in every lockfile root of the
 # repository and fail when any root reports an advisory at or above a severity

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2015,SC2016,SC2028,SC2317,SC2329  # `[[ ... ]] && pass || fail` is the test idiom (pass never fails); stubs are written as single-quoted text
 #
 # Tests for dependency-advisory-audit.sh, the gate that runs `pnpm audit` in
 # every tracked lockfile root and tells a finding (exit 1) from a fault (exit 69).
