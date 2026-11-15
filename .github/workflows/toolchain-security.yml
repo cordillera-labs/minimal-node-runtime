@@ -200,12 +200,24 @@ jobs:
           echo "Full CI passed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$child" \
             >> "$GITHUB_STEP_SUMMARY"
 
+      # Security CI can take more than an hour. Installation tokens expire
+      # after one hour, so mint a new token for the merge after CI finishes.
+      - name: Refresh scoped App token for post-CI merge
+        id: merge-app
+        if: steps.pr.outcome == 'success' && vars.TOOLCHAIN_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.TOOLCHAIN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TOOLCHAIN_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Merge only after full CI passes and trigger normal publishing
         if: steps.pr.outcome == 'success'
         env:
           PR: ${{ steps.pr.outputs.number }}
           HEAD: ${{ steps.propose.outputs.head }}
-          TOOLCHAIN_APP_TOKEN: ${{ steps.toolchain-app.outputs.token }}
+          TOOLCHAIN_APP_TOKEN: ${{ steps.merge-app.outputs.token }}
         run: |
           actual=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
           [ "$actual" = "$HEAD" ] || { echo 'PR head changed after CI'; exit 1; }
