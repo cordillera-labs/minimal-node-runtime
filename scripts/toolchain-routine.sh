@@ -114,12 +114,31 @@ while IFS= read -r item; do
         continue
     fi
 
-    # Never merge CI tested against an older main. Safely replay the verified
-    # single-pin commit onto the new main and dispatch fresh full CI. This is
-    # common because the independent trust-state observer commits to main.
+    # Require the exact tested PR head and successful full CI. When main
+    # advances, accept only explicitly build-inert observation-state commits;
+    # those cannot alter the image build definition, pinned line inputs, CI,
+    # or the trust exclusions baked into the image. All other main drift
+    # requires replaying the verified one-pin commit and re-running full CI.
     current_main=$(gh api "repos/$GH_REPO/branches/main" --jq .commit.sha)
+    needs_refresh=false
     if [[ "$parent" != "$current_main" ]]; then
-        echo "PR #$number has obsolete base $parent; safely refresh to $current_main."
+        git fetch --quiet origin main "$branch" ||
+            failure "Cannot fetch current main or routine PR #$number."
+        if [[ "$(git rev-parse --is-shallow-repository)" == true ]]; then
+            git fetch --quiet --unshallow origin main ||
+                failure "Cannot inspect the full git ancestry for PR #$number."
+        fi
+        fetched_main=$(git rev-parse refs/remotes/origin/main)
+        [[ "$fetched_main" == "$current_main" ]] ||
+            failure "Main advanced while examining PR #$number; retry on next run."
+        if python3 scripts/toolchain_observation_drift.py "$parent" "$current_main"; then
+            echo "PR #$number has only build-inert observation drift; preserving green exact-head CI."
+        else
+            needs_refresh=true
+        fi
+    fi
+    if [[ "$needs_refresh" == true ]]; then
+        echo "PR #$number has build-relevant or unverified drift from $parent to $current_main; refresh and retest."
         old_version=$(jq -er .from "$work/verify.json")
         new_version=$(jq -er .to "$work/verify.json")
         git fetch --quiet origin main "$branch" ||
@@ -156,6 +175,11 @@ while IFS= read -r item; do
         echo "Refreshed PR #$number and dispatched fresh full CI. No merge without the new exact-head result."
         exit 0
     fi
+    # Confirm main did not move during our drift inspection. The PR head
+    # match protects the CI result; the main match protects our drift verdict.
+    merge_main=$(gh api "repos/$GH_REPO/branches/main" --jq .commit.sha)
+    [[ "$merge_main" == "$current_main" ]] ||
+        failure "Main moved during PR #$number validation; retry without merging."
     actual=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
     [[ "$actual" == "$head" ]] || failure "PR #$number head changed after validation."
     GH_TOKEN="$pr_token" gh pr merge "$number" --squash --delete-branch --match-head-commit "$head" ||
