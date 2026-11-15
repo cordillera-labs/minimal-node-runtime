@@ -311,12 +311,19 @@ trigger ordinary `pull_request` CI without a human approval prompt. The job
 **also** explicitly dispatches `ci.yml` on the branch, preserving the existing
 exact-head, reproducibility and safety gate even during App migration. A
 subsequent hourly observation requires successful **full CI on exactly that
-head SHA**, a
-single-file/single-pin diff, a trusted bot branch, and the same `main` commit
-as the one CI tested. Only then can a **same-major** update squash-merge,
-without administrator bypass, and explicitly dispatch `update.yml` to rebuild
-and publish. A missing/failed CI run, stale base or merge-protection error
-leaves the PR open and creates a `toolchain-routine-failure` issue.
+head SHA**, a single-file/single-pin diff and a trusted bot branch. When `main`
+has moved since CI, the updater permits that green verdict to stand **only**
+if the previous base is an ancestor and every changed file is one of the
+build-inert observation records `state/trust/chrome.json`,
+`state/trust/mozilla.json` or `state/heartbeat`. The image's actual trust
+exclusions (`certificates.auto.exclude`), tool pins, locks, build scripts,
+workflow definitions and every other file require a refreshed PR and **new**
+exact-head CI. The list is fixed, not a permissive directory wildcard.
+
+A passing **same-major** update then squash-merges without administrator
+bypass and explicitly dispatches `update.yml` to rebuild/publish.
+Missing/failed CI, unexpected drift or merge-protection errors leave the PR
+open and create a `toolchain-routine-failure` issue.
 
 **Major upgrades**, including Cosign v2 → v3, are proposed with their own PR
 and receive the same CI, but **never auto-merge**; a maintainer must review
