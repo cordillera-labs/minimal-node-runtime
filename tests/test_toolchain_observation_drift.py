@@ -76,6 +76,7 @@ class ObservationDriftTests(unittest.TestCase):
     def test_rename_cannot_hide_unrelated_file_change(self):
         self.commit("scripts/security.py", "print('hello')\n")
         before = self.sha()
+        (self.repo / "state/trust").mkdir(parents=True, exist_ok=True)
         self.git("mv", "scripts/security.py", "state/trust/chrome.json")
         self.git("commit", "-q", "-m", "rename unrelated file")
         self.assertFalse(is_observation_only(self.repo, before, self.sha()))
