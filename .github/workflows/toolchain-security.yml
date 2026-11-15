@@ -29,10 +29,25 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - name: Mint one-repository toolchain GitHub App token
+        id: toolchain-app
+        if: vars.TOOLCHAIN_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.TOOLCHAIN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TOOLCHAIN_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Note pending App setup
+        if: steps.toolchain-app.outcome == 'skipped'
+        run: echo "::notice::TOOLCHAIN_APP_CLIENT_ID is unset; bot-created PR workflows still require approval."
+
       - name: Checkout trusted main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
+          token: ${{ steps.toolchain-app.outputs.token || github.token }}
           persist-credentials: true # zizmor: ignore[artipacked] needed to push trusted pin-only branch
 
       - name: Read upstream security advisories and stable releases
@@ -136,6 +151,7 @@ jobs:
           BRANCH: ${{ steps.propose.outputs.branch }}
           TOOL: ${{ steps.propose.outputs.tool }}
           VERSION: ${{ steps.propose.outputs.new }}
+          TOOLCHAIN_APP_TOKEN: ${{ steps.toolchain-app.outputs.token }}
         run: |
           gh label create toolchain-security-auto --force \
             --description 'GHSA-backed automated toolchain pin upgrade' >/dev/null
@@ -151,7 +167,10 @@ jobs:
             echo 'CI must pass both Node lines, all gates and reproducibility before merge.'
             echo "Source: $RUN_URL"
           } > "$RUNNER_TEMP/security-pr.md"
-          gh pr create --base main --head "$BRANCH" \
+          # App-authored PRs trigger normal pull_request checks without a
+          # human approval prompt. Until the App is installed, retain the
+          # existing GITHUB_TOKEN fallback and explicit CI dispatch.
+          GH_TOKEN="${TOOLCHAIN_APP_TOKEN:-$GH_TOKEN}" gh pr create --base main --head "$BRANCH" \
             --title "Security: upgrade $TOOL to $VERSION" \
             --body-file "$RUNNER_TEMP/security-pr.md" --label toolchain-security-auto
           number=$(gh pr list --state open --head "$BRANCH" --json number \
@@ -159,7 +178,7 @@ jobs:
           [[ "$number" =~ ^[0-9]+$ ]] || exit 1
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
-      - name: Explicitly dispatch full read-only CI (bot PR events are suppressed)
+      - name: Explicitly dispatch exact-head full CI for the security gate
         if: steps.pr.outcome == 'success'
         env:
           BRANCH: ${{ steps.propose.outputs.branch }}
@@ -186,11 +205,12 @@ jobs:
         env:
           PR: ${{ steps.pr.outputs.number }}
           HEAD: ${{ steps.propose.outputs.head }}
+          TOOLCHAIN_APP_TOKEN: ${{ steps.toolchain-app.outputs.token }}
         run: |
           actual=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
           [ "$actual" = "$HEAD" ] || { echo 'PR head changed after CI'; exit 1; }
           # Honor branch protection; never use --admin or force.
-          gh pr merge "$PR" --squash --delete-branch
+          GH_TOKEN="${TOOLCHAIN_APP_TOKEN:-$GH_TOKEN}" gh pr merge "$PR" --squash --delete-branch
           gh workflow run update.yml --ref main
           echo "Merged security pin PR #$PR and dispatched normal publication pipeline." \
             >> "$GITHUB_STEP_SUMMARY"
