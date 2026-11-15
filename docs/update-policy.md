@@ -306,9 +306,12 @@ verified immutable tag-plus-SHA-256 digest. BuildKit and Buildx are always
 separate proposals. The pin and release notes remain visible in the update
 issue and PR.
 
-Because a PR opened by `GITHUB_TOKEN` does not start `pull_request` CI, the
-job explicitly dispatches `ci.yml` on the new branch. A subsequent hourly
-observation requires successful **full CI on exactly that head SHA**, a
+PRs authored with the dedicated [toolchain GitHub App](toolchain-github-app.md)
+trigger ordinary `pull_request` CI without a human approval prompt. The job
+**also** explicitly dispatches `ci.yml` on the branch, preserving the existing
+exact-head, reproducibility and safety gate even during App migration. A
+subsequent hourly observation requires successful **full CI on exactly that
+head SHA**, a
 single-file/single-pin diff, a trusted bot branch, and the same `main` commit
 as the one CI tested. Only then can a **same-major** update squash-merge,
 without administrator bypass, and explicitly dispatch `update.yml` to rebuild
@@ -363,10 +366,13 @@ After successful merge it explicitly dispatches the usual `update.yml`
 publication pipeline, because bot-authored commits do not trigger push-based
 workflows.
 
-The first adoption requires enabling the repository setting allowing GitHub
-Actions to **create pull requests**; ordinary write permissions and CI branch
-protection must also permit the intended merge. Without that, the bot will
-fail visibly and leave the current pinned versions unchanged.
+The existing GITHUB_TOKEN fallback requires repository settings allowing
+GitHub Actions to **create pull requests**. For unattended operation, install
+the [single-repository toolchain GitHub App](toolchain-github-app.md) and
+provision its Client ID and private key; App-authored PR events do not require
+the GITHUB_TOKEN workflow-approval prompt. CI branch protection still applies,
+and the App never bypasses it. Security validation can outlast a one-hour
+installation token, so the merge step mints a fresh App token after CI.
 
 ### Trivy 403 recovery and Go advisory coverage
 

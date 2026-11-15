@@ -95,9 +95,24 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      - name: Mint one-repository toolchain GitHub App token
+        id: toolchain-app
+        if: vars.TOOLCHAIN_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.TOOLCHAIN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TOOLCHAIN_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Note pending App setup
+        if: steps.toolchain-app.outcome == 'skipped'
+        run: echo "::notice::TOOLCHAIN_APP_CLIENT_ID is unset; bot-created PR workflows still require approval."
+
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          token: ${{ steps.toolchain-app.outputs.token || github.token }}
           persist-credentials: true # zizmor: ignore[artipacked] push trusted pin-only PR branches
 
       - name: Compare the pins with upstream
@@ -127,6 +142,9 @@ jobs:
           done
 
       - name: Advance routine toolchain PRs after the release cooldown
+        env:
+          ROUTINE_APP_TOKEN: ${{ steps.toolchain-app.outputs.token }}
+          ROUTINE_APP_SLUG: ${{ steps.toolchain-app.outputs.app-slug }}
         run: bash scripts/toolchain-routine.sh "$RUNNER_TEMP/toolchain.json"
 
   keepalive:

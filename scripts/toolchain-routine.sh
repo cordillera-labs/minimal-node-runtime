@@ -31,6 +31,14 @@ if [[ -n "$security_pr" ]]; then
     exit 0
 fi
 
+# The App token is used only for PR authoring/merge. The job token retains
+# issue maintenance, CI dispatch, and read-only metadata permissions.
+pr_token=${ROUTINE_APP_TOKEN:-$GH_TOKEN}
+if [[ -n "${ROUTINE_APP_TOKEN:-}" ]]; then
+    [[ "${ROUTINE_APP_SLUG:-}" =~ ^[a-z0-9][a-z0-9-]*$ ]] ||
+        failure "Invalid GitHub App slug from token creation."
+fi
+
 gh label create toolchain-routine-auto --force \
     --description 'Cooldown-eligible routine toolchain pin upgrade' >/dev/null
 open=$(gh pr list --state open --label toolchain-routine-auto --limit 100 \
@@ -52,10 +60,12 @@ while IFS= read -r item; do
         failure "Unexpected PR #$number head branch $branch has the routine bot label."
     fi
     tool=${BASH_REMATCH[1]}
-    # GitHub GraphQL (gh pr list) reports the Actions app as app/github-actions,
-    # while REST (gh pr view) reports github-actions[bot]. Both name the same
-    # trusted GitHub Actions identity; accept only these exact spellings.
-    if [[ "$author" != 'github-actions[bot]' && "$author" != 'app/github-actions' ]] ||
+    # GitHub GraphQL reports app/<slug>, while REST reports <slug>[bot].
+    # Preserve the legacy Actions-owned PR #39 during the migration; future
+    # PRs must match the installed, narrowly scoped GitHub App's exact slug.
+    if [[ "$author" != 'github-actions[bot]' && "$author" != 'app/github-actions' &&
+          "$author" != "app/${ROUTINE_APP_SLUG:-}" &&
+          "$author" != "${ROUTINE_APP_SLUG:-}[bot]" ]] ||
             [[ "$base" != main ]]; then
         failure "Unexpected PR #$number author $author or base $base."
     fi
@@ -148,7 +158,7 @@ while IFS= read -r item; do
     fi
     actual=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
     [[ "$actual" == "$head" ]] || failure "PR #$number head changed after validation."
-    gh pr merge "$number" --squash --delete-branch --match-head-commit "$head" ||
+    GH_TOKEN="$pr_token" gh pr merge "$number" --squash --delete-branch --match-head-commit "$head" ||
         failure "PR #$number passed CI but branch protection or merge failed."
     gh workflow run update.yml --ref main ||
         failure "PR #$number merged but publication dispatch failed."
@@ -218,7 +228,7 @@ git push --set-upstream origin "$branch" ||
     echo 'Only toolchain.env changes; immutable registry digests are included for image pins.'
     echo "Monitor: $RUN_URL"
 } > "$work/pr.md"
-gh pr create --base main --head "$branch" \
+GH_TOKEN="$pr_token" gh pr create --base main --head "$branch" \
     --title "Routine: upgrade $tool to $new" \
     --body-file "$work/pr.md" --label toolchain-routine-auto ||
     failure "GitHub could not create the $tool PR (check Actions create-PR setting)."
