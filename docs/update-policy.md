@@ -297,6 +297,11 @@ is at least `COOLDOWN_DAYS` (seven days) old. The existing hourly `toolchain`
 job keeps one `toolchain-update` issue per eligible tool, and also invokes
 `scripts/toolchain-routine.sh` to advance a `toolchain-routine-auto` PR or
 propose the next eligible pin. This is **not** another scheduled workflow.
+The toolchain job starts only **after both Node line jobs have finished
+publishing and recording their locks**. Line lock changes are build-relevant
+and must invalidate earlier CI; running the two activities concurrently made
+the first successful CI obsolete during the same update run. Failed line jobs
+do not suppress the toolchain observer (the dependency uses `always()`).
 
 The planner rejects malformed release metadata, unknown tool pins, stale
 version claims, unfinished cooldowns and noncanonical release URLs. It never
