@@ -229,9 +229,18 @@ while IFS= read -r item; do
     [[ "$actual" == "$head" ]] || failure "PR #$number head changed after validation."
     GH_TOKEN="$pr_token" gh pr merge "$number" --squash --delete-branch --match-head-commit "$head" ||
         failure "PR #$number passed CI but branch protection or merge failed."
-    gh workflow run update.yml --ref main ||
-        failure "PR #$number merged but publication dispatch failed."
-    echo "Merged verified routine PR #$number and dispatched publication."
+    if [[ -n "${ROUTINE_APP_TOKEN:-}" ]]; then
+        # The App-authored squash merge already triggers update.yml via its
+        # toolchain.env push filter. A second workflow_dispatch races that
+        # queued run and GitHub cancels one pending run (even with
+        # cancel-in-progress: false).
+        echo "Merged verified routine PR #$number; the App push triggers publication."
+    else
+        # GITHUB_TOKEN does not trigger another workflow on push.
+        gh workflow run update.yml --ref main ||
+            failure "PR #$number merged but publication dispatch failed."
+        echo "Merged verified routine PR #$number; explicitly dispatched publication."
+    fi
     scripts/issue.sh close toolchain-routine-failure \
         'Automated routine toolchain update did not finish' "Routine PR #$number merged successfully."
     # The earlier release report was generated on the old main. Recheck next run.
