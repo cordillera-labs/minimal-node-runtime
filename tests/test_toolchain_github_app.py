@@ -61,6 +61,17 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('  workflow_dispatch:', self.update)
         self.assertIn('gh workflow run update.yml --ref main', self.routine)
 
+    def test_line_recording_finishes_before_routine_ci_adoption(self):
+        # The publish jobs write state/<line>/stable.lock on main. Starting
+        # routine CI concurrently invalidates the tested base while it runs,
+        # forcing another rebase and another CI instead of adopting the PR.
+        # Do not disable the updater if a line job fails.
+        toolchain_job = self.update.split('  toolchain:\\n', 1)[1].split('  keepalive:', 1)[0]
+        self.assertIn('    needs: [line]\\n', toolchain_job)
+        self.assertIn("    if: always() && github.ref == 'refs/heads/main'", toolchain_job)
+        self.assertIn('      group: toolchain-security', toolchain_job)
+        self.assertIn('Advance routine toolchain PRs after the release cooldown', toolchain_job)
+
     def test_security_refreshes_app_token_after_ci(self):
         self.assertIn('GH_TOKEN="${TOOLCHAIN_APP_TOKEN:-$GH_TOKEN}" gh pr create', self.security)
         self.assertIn('GH_TOKEN="${TOOLCHAIN_APP_TOKEN:-$GH_TOKEN}" gh pr merge', self.security)
