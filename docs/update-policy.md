@@ -320,8 +320,25 @@ exclusions (`certificates.auto.exclude`), tool pins, locks, build scripts,
 workflow definitions and every other file require a refreshed PR and **new**
 exact-head CI. The list is fixed, not a permissive directory wildcard.
 
-A passing **same-major** update then squash-merges without administrator
-bypass and explicitly dispatches `update.yml` to rebuild/publish.
+The updater now waits (with an explicit time limit) for the exact-head
+`workflow_dispatch` CI it just started. On success, it **re-enters the full
+adoption gate in the same workflow run**, verifies the PR author, exact head,
+one-pin diff, drift, and CI result again, then squash-merges a same-major
+update without administrator bypass. It does not need a second hourly run
+merely to notice the CI has finished. If runners remain queued beyond the
+bound, it leaves the PR open for the next scheduled check; failures and
+unexpected drift are still fail-closed.
+
+A merge pushes the changed `toolchain.env` to `main`, which independently
+triggers `update.yml` through a path-filtered `push` event using the
+GitHub App identity. This promptly rebuilds/publishes both Node lines, rather
+than relying on potentially delayed schedules. The explicit
+`gh workflow run update.yml` dispatch remains as a fallback for merges made
+with `GITHUB_TOKEN`, which do not generate follow-on push workflows. The
+image lock and CA observation commits do not match this push filter. Changes
+to the `update.yml` workflow itself also trigger one reevaluation, including
+when an updater repair is merged while a previously validated pin awaits
+publication.
 Missing/failed CI, unexpected drift or merge-protection errors leave the PR
 open and create a `toolchain-routine-failure` issue.
 

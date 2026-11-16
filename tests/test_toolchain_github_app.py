@@ -42,6 +42,25 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('${ROUTINE_APP_SLUG:-}[bot]', self.routine)
         self.assertIn("'github-actions[bot]'", self.routine)
 
+    def test_routine_waits_for_exact_head_ci_before_automatic_adoption(self):
+        # Creating/refreshing a pin must not require a *second* scheduled run
+        # to notice that its own CI passed. The re-entry still executes every
+        # existing PR/head/diff/major and main-drift validation.
+        self.assertIn('adopt_when_ci_finishes() {', self.routine)
+        self.assertIn('--event workflow_dispatch --limit 100 --json databaseId,headSha', self.routine)
+        self.assertIn('select(.headSha ==', self.routine)
+        self.assertIn('timeout --kill-after=30s 660 gh run watch "$child" --exit-status', self.routine)
+        self.assertIn('ROUTINE_CI_REENTRY=1 bash "$0" "$report"', self.routine)
+        self.assertEqual(self.routine.count('adopt_when_ci_finishes "$branch" "$(git rev-parse HEAD)"'), 2)
+        self.assertIn('GH_TOKEN="$pr_token" gh pr merge "$number"', self.routine)
+        self.assertIn('--match-head-commit "$head"', self.routine)
+
+    def test_toolchain_pin_push_publishes_without_recursive_record_commits(self):
+        self.assertIn('  push:\n    branches: [main]\n    paths:\n      - toolchain.env\n      - .github/workflows/update.yml', self.update)
+        self.assertIn('    - cron:', self.update)
+        self.assertIn('  workflow_dispatch:', self.update)
+        self.assertIn('gh workflow run update.yml --ref main', self.routine)
+
     def test_security_refreshes_app_token_after_ci(self):
         self.assertIn('GH_TOKEN="${TOOLCHAIN_APP_TOKEN:-$GH_TOKEN}" gh pr create', self.security)
         self.assertIn('GH_TOKEN="${TOOLCHAIN_APP_TOKEN:-$GH_TOKEN}" gh pr merge', self.security)
