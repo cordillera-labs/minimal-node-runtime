@@ -16,6 +16,14 @@ name: update
 run-name: ${{ inputs.distrust_run_id && format('CA distrust {0}', inputs.distrust_run_id) || 'Update' }}
 
 on:
+  # An App-authored toolchain pin merge should rebuild/publish immediately,
+  # without depending on a possibly delayed hourly schedule. The published
+  # line-state and CA observer commits do not match this narrow path filter,
+  # so recording image state cannot retrigger the update recursively.
+  push:
+    branches: [main]
+    paths:
+      - toolchain.env
   schedule:
     # Minute 17: GitHub documents the start of the hour as its peak load.
     - cron: '17 * * * *'
