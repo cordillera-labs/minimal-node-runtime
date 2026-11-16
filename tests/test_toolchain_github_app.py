@@ -56,7 +56,7 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('--match-head-commit "$head"', self.routine)
 
     def test_toolchain_pin_push_publishes_without_recursive_record_commits(self):
-        self.assertIn('  push:\\n    branches: [main]\\n    paths:\\n      - toolchain.env', self.update)
+        self.assertIn('  push:\n    branches: [main]\n    paths:\n      - toolchain.env\n      - .github/workflows/update.yml', self.update)
         self.assertIn('    - cron:', self.update)
         self.assertIn('  workflow_dispatch:', self.update)
         self.assertIn('gh workflow run update.yml --ref main', self.routine)
