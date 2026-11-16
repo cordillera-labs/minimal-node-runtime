@@ -66,8 +66,8 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         # routine CI concurrently invalidates the tested base while it runs,
         # forcing another rebase and another CI instead of adopting the PR.
         # Do not disable the updater if a line job fails.
-        toolchain_job = self.update.split('  toolchain:\\n', 1)[1].split('  keepalive:', 1)[0]
-        self.assertIn('    needs: [line]\\n', toolchain_job)
+        toolchain_job = self.update.split('  toolchain:\n', 1)[1].split('  keepalive:', 1)[0]
+        self.assertIn('    needs: [line]\n', toolchain_job)
         self.assertIn("    if: always() && github.ref == 'refs/heads/main'", toolchain_job)
         self.assertIn('      group: toolchain-security', toolchain_job)
         self.assertIn('Advance routine toolchain PRs after the release cooldown', toolchain_job)
