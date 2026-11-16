@@ -22,6 +22,49 @@ failure() {
     exit 1
 }
 
+# The exact-head CI gate remains the only merge authority, but making the
+# scheduled observer wait for its own dispatched read-only CI allows the same
+# update run to adopt a successful pin and trigger publication. Otherwise an
+# hourly schedule (or one manually dispatched run) only launches CI and stops.
+#
+# Bound the wait so queued runners cannot hold the publish concurrency group
+# indefinitely. If CI is still queued, keep the PR and allow the next observer
+# to adopt the exact validated head. One re-entry is enough; if main changes
+# materially again during CI the safe replay/retest fallback stays in force.
+adopt_when_ci_finishes() {
+    local branch=$1 head=$2 child='' attempt rc
+    if [[ "${ROUTINE_CI_REENTRY:-0}" == 1 ]]; then
+        echo "CI re-entry already used; leaving any additional refresh for the next observer."
+        return 0
+    fi
+    for attempt in $(seq 1 40); do
+        child=$(gh run list --workflow ci.yml --branch "$branch" \
+            --event workflow_dispatch --limit 100 --json databaseId,headSha \
+            --jq ".[] | select(.headSha == \"$head\") | .databaseId" | head -1) ||
+            failure "Cannot locate exact-head CI for $branch."
+        if [[ "$child" =~ ^[0-9]+$ ]]; then break; fi
+        sleep 5
+    done
+    if [[ ! "$child" =~ ^[0-9]+$ ]]; then
+        echo "::warning::No exact-head CI run observed for $head; the next observer will retry."
+        return 0
+    fi
+    echo "Watching exact-head CI $child for $head before guarded adoption."
+    if timeout --kill-after=30s 660 gh run watch "$child" --exit-status; then
+        # Re-run every existing trusted PR/head/base/diff/major-version check.
+        # Never merge merely because the watcher succeeded.
+        ROUTINE_CI_REENTRY=1 bash "$0" "$report"
+        return 0
+    else
+        rc=$?
+        if [[ "$rc" == 124 ]]; then
+            echo "::warning::Exact-head CI $child exceeded the wait budget; the next observer will adopt it if green."
+            return 0
+        fi
+        failure "Exact-head full CI run $child for $branch failed or could not be watched (exit $rc)."
+    fi
+}
+
 # The emergency advisory-backed lane takes priority. Both jobs also share a
 # concurrency group so they cannot mutate the repo at exactly the same time.
 security_pr=$(gh pr list --state open --label toolchain-security-auto \
@@ -172,7 +215,8 @@ while IFS= read -r item; do
             failure "Routine PR #$number branch changed during refresh."
         gh workflow run ci.yml --ref "$branch" ||
             failure "Refreshed PR #$number but could not dispatch fresh CI."
-        echo "Refreshed PR #$number and dispatched fresh full CI. No merge without the new exact-head result."
+        echo "Refreshed PR #$number and dispatched fresh full CI."
+        adopt_when_ci_finishes "$branch" "$(git rev-parse HEAD)"
         exit 0
     fi
     # Confirm main did not move during our drift inspection. The PR head
@@ -259,3 +303,6 @@ GH_TOKEN="$pr_token" gh pr create --base main --head "$branch" \
 gh workflow run ci.yml --ref "$branch" ||
     failure "Created the $tool PR but full CI dispatch failed."
 echo "Created routine $tool $new PR and explicitly dispatched full CI."
+if [[ "$major" == false ]]; then
+    adopt_when_ci_finishes "$branch" "$(git rev-parse HEAD)"
+fi
