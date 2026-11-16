@@ -335,7 +335,10 @@ GitHub App identity. This promptly rebuilds/publishes both Node lines, rather
 than relying on potentially delayed schedules. The explicit
 `gh workflow run update.yml` dispatch remains as a fallback for merges made
 with `GITHUB_TOKEN`, which do not generate follow-on push workflows. The
-image lock and CA observation commits do not match this push filter.
+image lock and CA observation commits do not match this push filter. Changes
+to the `update.yml` workflow itself also trigger one reevaluation, including
+when an updater repair is merged while a previously validated pin awaits
+publication.
 Missing/failed CI, unexpected drift or merge-protection errors leave the PR
 open and create a `toolchain-routine-failure` issue.
 
