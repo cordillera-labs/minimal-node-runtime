@@ -38,6 +38,7 @@ adopt_when_ci_finishes() {
         return 0
     fi
     for attempt in $(seq 1 40); do
+        echo "Discovering exact-head CI for $head: poll $attempt/40"
         child=$(gh run list --workflow ci.yml --branch "$branch" \
             --event workflow_dispatch --limit 100 --json databaseId,headSha \
             --jq ".[] | select(.headSha == \"$head\") | .databaseId" | head -1) ||
