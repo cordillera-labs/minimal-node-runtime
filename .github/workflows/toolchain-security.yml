@@ -223,9 +223,17 @@ jobs:
           [ "$actual" = "$HEAD" ] || { echo 'PR head changed after CI'; exit 1; }
           # Honor branch protection; never use --admin or force.
           GH_TOKEN="${TOOLCHAIN_APP_TOKEN:-$GH_TOKEN}" gh pr merge "$PR" --squash --delete-branch
-          gh workflow run update.yml --ref main
-          echo "Merged security pin PR #$PR and dispatched normal publication pipeline." \
-            >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "${TOOLCHAIN_APP_TOKEN:-}" ]]; then
+            # App merges already trigger the toolchain.env push filter in
+            # update.yml. Dispatching a second run cancels one pending run.
+            echo "Merged security pin PR #$PR; the App push triggers publication." \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            # GITHUB_TOKEN pushes do not create follow-on workflow runs.
+            gh workflow run update.yml --ref main
+            echo "Merged security pin PR #$PR; explicitly dispatched publication." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Alert when an automatic security upgrade was interrupted
         if: failure()

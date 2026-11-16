@@ -337,8 +337,11 @@ unexpected drift are still fail-closed.
 A merge pushes the changed `toolchain.env` to `main`, which independently
 triggers `update.yml` through a path-filtered `push` event using the
 GitHub App identity. This promptly rebuilds/publishes both Node lines, rather
-than relying on potentially delayed schedules. The explicit
-`gh workflow run update.yml` dispatch remains as a fallback for merges made
+than relying on potentially delayed schedules. Because the App merge
+already triggers a push event, the updater does **not** also dispatch another
+`Update` run: duplicate triggers can cause GitHub to cancel a pending
+workflow in the shared publication concurrency group. The explicit
+`gh workflow run update.yml` dispatch is retained **only** for merges made
 with `GITHUB_TOKEN`, which do not generate follow-on push workflows. The
 image lock and CA observation commits do not match this push filter. Changes
 to the `update.yml` workflow itself also trigger one reevaluation, including

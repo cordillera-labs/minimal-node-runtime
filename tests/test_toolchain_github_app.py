@@ -61,6 +61,19 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('  workflow_dispatch:', self.update)
         self.assertIn('gh workflow run update.yml --ref main', self.routine)
 
+    def test_app_merges_only_dispatch_publication_once(self):
+        # App-authored merges already produce update.yml push events.
+        # A second explicit dispatch can cancel one queued run because GitHub
+        # only retains a single pending run per concurrency group.
+        routine_after_merge = self.routine.split('GH_TOKEN="$pr_token" gh pr merge', 1)[1]
+        self.assertIn('if [[ -n "${ROUTINE_APP_TOKEN:-}" ]]; then', routine_after_merge)
+        self.assertIn('else\n        # GITHUB_TOKEN', routine_after_merge)
+        self.assertIn('gh workflow run update.yml --ref main', routine_after_merge)
+
+        security_after_merge = self.security.split('gh pr merge "$PR" --squash --delete-branch', 1)[1]
+        self.assertIn('if [[ -n "${TOOLCHAIN_APP_TOKEN:-}" ]]; then', security_after_merge)
+        self.assertIn('gh workflow run update.yml --ref main', security_after_merge)
+
     def test_line_recording_finishes_before_routine_ci_adoption(self):
         # The publish jobs write state/<line>/stable.lock on main. Starting
         # routine CI concurrently invalidates the tested base while it runs,
