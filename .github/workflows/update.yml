@@ -5,9 +5,9 @@
 #
 #   lines      list the lines from state/.
 #   line       line.yml, once per line.
-#   toolchain  compare pins with cooldown-eligible upstream releases, report
-#              issues, and advance one pin-only routine PR through full CI.
-#              This is independent of the line publication jobs.
+#   toolchain  after line publication/recording completes, compare pins with
+#              eligible upstream releases and adopt one pin-only PR through
+#              exact-head full CI. It still runs if any line job fails.
 #   keepalive  commit a heartbeat when main has been quiet.
 #
 # Events made with GITHUB_TOKEN start no workflow runs, so nothing here relies
@@ -85,11 +85,15 @@ jobs:
       line: ${{ matrix.line }}
 
   toolchain:
-    # Dependabot does not read toolchain.env. Report every eligible pin, then
-    # advance at most one bot PR. The security fast path has priority and uses
-    # the same concurrency group; normal publishing remains independent.
-    # Lookup faults never authorize pin changes.
-    if: github.ref == 'refs/heads/main'
+    # A line may commit its lock while a routine PR is running full CI.
+    # Those lock commits are build-relevant and correctly invalidate the
+    # PR's previously tested main; racing this job with line publication
+    # caused a repeated rebase/CI loop in production (#46). Finish all line
+    # records first, then begin the one-run toolchain CI/adoption lifecycle.
+    # The security fast path remains separately scheduled with priority.
+    # A failing line must NOT disable security/toolchain observation.
+    needs: [line]
+    if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     concurrency:
