@@ -73,8 +73,9 @@ def finding(provider, pkg, kind, severity, detail, blocking=False, evidence=None
 
 
 def from_trivy(report, only_fixable=True):
-    if not isinstance(report, dict) or not isinstance(report.get("Results"), list):
-        raise ValueError("Trivy report missing Results array")
+    if (not isinstance(report, dict) or not isinstance(report.get("Results"), list)
+            or not report["Results"]):
+        raise ValueError("Trivy report must have nonempty Results array")
     observations = []
     for result in report["Results"]:
         for vuln in result.get("Vulnerabilities") or []:
@@ -213,14 +214,17 @@ def openssf_result(packages, rows):
         if key not in expected:
             continue
         pkg = expected[key]
-        matched.add(key)
         raw = row.get("install")
         if raw is None:
-            raw = (row.get("Analysis") or {}).get("install") or {}
+            raw = (row.get("Analysis") or {}).get("install")
+        # A result without an install phase is not evidence of clean behavior.
+        if raw is None:
+            continue
         if isinstance(raw, str):
             raw = json.loads(raw)
         if not isinstance(raw, dict):
             raise ValueError("invalid OpenSSF install analysis")
+        matched.add(key)
         commands = []
         for group in collect_tree(raw, "Command"):
             if isinstance(group, list) and group:
