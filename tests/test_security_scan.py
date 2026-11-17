@@ -55,8 +55,9 @@ class TrivyTests(unittest.TestCase):
         self.assertEqual(len(scan.from_trivy(report, only_fixable=False)["findings"]), 2)
 
     def test_no_results_is_not_a_scanner_pass(self):
-        with self.assertRaises(ValueError):
-            scan.from_trivy({})
+        for report in ({}, {"Results": []}):
+            with self.subTest(report=report), self.assertRaises(ValueError):
+                scan.from_trivy(report)
 
 
 class SocketTests(unittest.TestCase):
@@ -90,6 +91,25 @@ class SocketTests(unittest.TestCase):
         self.assertEqual(scan.parse_socket_rows(b"[" + doc.strip() + b"]")[0]["type"], "npm")
         with self.assertRaises(ValueError):
             scan.parse_socket_rows(b'{"unexpected":"schema"}')
+
+    def test_live_socket_request_uses_exact_purl_and_bearer_token(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, _):
+                return b'{"type":"npm","name":"example","version":"4.2.1","alerts":[]}\\n'
+        def urlopen(request, timeout):
+            self.assertEqual(request.get_method(), "POST")
+            self.assertIn("/orgs/my-org/purl?", request.full_url)
+            self.assertEqual(request.get_header("Authorization"), "Bearer private-token")
+            self.assertEqual(json.loads(request.data)["components"],
+                             [{"purl": "pkg:npm/example@4.2.1"}])
+            self.assertEqual(timeout, 20)
+            return Response()
+        with mock.patch.object(scan.urllib.request, "urlopen", side_effect=urlopen):
+            result = scan.fetch_socket([pkg()], "my-org", "private-token")
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["covered"], 1)
 
     def test_no_token_cannot_be_clean(self):
         result = scan.fetch_socket([pkg()], "", "")
@@ -125,6 +145,23 @@ class OpenSSFTests(unittest.TestCase):
         result = scan.openssf_result([pkg(version="4.2.2")], rows)
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["findings"], [])
+        self.assertEqual(result["covered"], 0)
+
+    def test_bigquery_adapter_parameterizes_exact_versions(self):
+        command = []
+        def fake_run(args, **_kwargs):
+            command.extend(args)
+            return mock.Mock(returncode=0, stdout=json.dumps([
+                {"name":"example", "version":"4.2.1", "install":"{}"}]))
+        with mock.patch.object(scan.subprocess, "run", side_effect=fake_run):
+            result = scan.query_openssf([pkg()], "valid-project")
+        self.assertEqual(result["status"], "complete")
+        self.assertTrue(any(v.startswith("--parameter=requested:STRING:") for v in command))
+        self.assertIn("ossf-malware-analysis.packages.analysis", command[-1])
+
+    def test_unobserved_install_phase_is_missing(self):
+        result = scan.openssf_result([pkg()], [{"name":"example","version":"4.2.1"}])
+        self.assertEqual(result["status"], "partial")
         self.assertEqual(result["covered"], 0)
 
     def test_bigquery_missing_is_explicit(self):
