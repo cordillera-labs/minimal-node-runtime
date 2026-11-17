@@ -85,6 +85,15 @@ class SocketTests(unittest.TestCase):
         self.assertTrue(result["findings"][0]["blocking"])
         self.assertEqual(result["missing"], ["pkg:npm/other@1.0"])
 
+    def test_numeric_high_socket_severity_blocks(self):
+        result = scan.socket_result([pkg()], [
+            {"type": "npm", "name": "example", "version": "4.2.1",
+             "alerts": [{"type": "suspiciousInstallScript", "severity": 2}]},
+        ])
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["findings"][0]["severity"], "high")
+        self.assertTrue(result["findings"][0]["blocking"])
+
     def test_json_and_ndjson_decode(self):
         doc = b'{"type":"npm","name":"example","version":"4.2.1","alerts":[]}\n'
         self.assertEqual(scan.parse_socket_rows(doc)[0]["name"], "example")
