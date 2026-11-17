@@ -51,28 +51,28 @@ inputs:
 outputs:
   report:
     description: "Absolute path to assessment JSON"
-    value: ${{ steps.scan.outputs.report }
+    value: ${{ steps.scan.outputs.report }}
   verdict:
     description: "pass, block or incomplete"
-    value: ${{ steps.scan.outputs.verdict }
+    value: ${{ steps.scan.outputs.verdict }}
 runs:
   using: composite
   steps:
     - id: scan
       shell: bash
       env:
-        SECURITY_SCAN_SBOM: ${{ inputs.sbom }
-        SECURITY_SCAN_IMAGE: ${{ inputs.image }
-        SECURITY_SCAN_TRIVY_REPORT: ${{ inputs.trivy-report }
-        SECURITY_SCAN_PROVIDERS: ${{ inputs.providers }
-        SECURITY_SCAN_MODE: ${{ inputs.mode }
-        SECURITY_SCAN_FIXABLE: ${{ inputs.trivy-fixable-only }
-        SECURITY_SCAN_SOCKET_ORG: ${{ inputs.socket-org }
-        SOCKET_SECURITY_TOKEN: ${{ inputs.socket-token }
-        SECURITY_SCAN_OPENSSF_JSON: ${{ inputs.openssf-json }
-        SECURITY_SCAN_OPENSSF_PROJECT: ${{ inputs.openssf-project }
-        SECURITY_SCAN_TIMEOUT: ${{ inputs.timeout }
-        SECURITY_SCAN_OUTPUT: ${{ inputs.output }
+        SECURITY_SCAN_SBOM: ${{ inputs.sbom }}
+        SECURITY_SCAN_IMAGE: ${{ inputs.image }}
+        SECURITY_SCAN_TRIVY_REPORT: ${{ inputs.trivy-report }}
+        SECURITY_SCAN_PROVIDERS: ${{ inputs.providers }}
+        SECURITY_SCAN_MODE: ${{ inputs.mode }}
+        SECURITY_SCAN_FIXABLE: ${{ inputs.trivy-fixable-only }}
+        SECURITY_SCAN_SOCKET_ORG: ${{ inputs.socket-org }}
+        SOCKET_SECURITY_TOKEN: ${{ inputs.socket-token }}
+        SECURITY_SCAN_OPENSSF_JSON: ${{ inputs.openssf-json }}
+        SECURITY_SCAN_OPENSSF_PROJECT: ${{ inputs.openssf-project }}
+        SECURITY_SCAN_TIMEOUT: ${{ inputs.timeout }}
+        SECURITY_SCAN_OUTPUT: ${{ inputs.output }}
       run: |
         set -euo pipefail
         args=(
