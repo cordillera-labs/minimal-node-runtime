@@ -213,6 +213,16 @@ jobs:
           scripts/sbom-bundled.sh minimal-node-runtime:build "$work/sbom.trivy.cdx.json" "$work/ci.lock" \
             "$(cat "$work/out/digest")" "$work/sbom.cdx.json"
 
+      - name: Exercise public reusable security-scan action on this image
+        # Evidence enrichment is report-only while external providers are
+        # configured and validated. Existing Trivy and image gates still block.
+        uses: ./actions/security-scan # zizmor: ignore[self-repository] pinned actionlint 1.7.12 does not recognize $/ refs; checkout already performed
+        with:
+          sbom: ${{ runner.temp }}/work/sbom.cdx.json
+          trivy-report: ${{ runner.temp }}/work/scan.json
+          providers: trivy,socket,openssf
+          mode: report
+
       - name: Prove monitored CA distrust triggers a real image rebuild
         run: |
           # A synthetic Mozilla trust withdrawal is applied only inside this

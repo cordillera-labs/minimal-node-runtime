@@ -1,0 +1,95 @@
+name: "Cordillera security scan"
+description: "Reusable CycloneDX security assessment: Trivy vulnerabilities, Socket alerts, and OpenSSF behavioral observations"
+inputs:
+  sbom:
+    description: "Path to the canonical CycloneDX JSON SBOM in the caller workspace"
+    required: true
+  image:
+    description: "Optional image reference, used when no existing Trivy report is supplied"
+    required: false
+    default: ""
+  trivy-report:
+    description: "Path to an existing Trivy JSON report; reuse existing scans instead of rescanning"
+    required: false
+    default: ""
+  providers:
+    description: "Comma-separated providers: trivy,socket,openssf"
+    required: false
+    default: "trivy,socket,openssf"
+  mode:
+    description: "report (never block on findings) or enforce (block on findings or missing coverage)"
+    required: false
+    default: "report"
+  trivy-fixable-only:
+    description: "Only block high/critical Trivy vulnerabilities with known fixes, matching the Minimal Node Runtime policy"
+    required: false
+    default: "true"
+  socket-org:
+    description: "Socket organization slug; requires socket-token for live lookup"
+    required: false
+    default: ""
+  socket-token:
+    description: "Socket API token with packages:list permission; passed only through the step environment"
+    required: false
+    default: ""
+  openssf-json:
+    description: "Optional JSON array export of OpenSSF Package Analysis BigQuery rows"
+    required: false
+    default: ""
+  openssf-project:
+    description: "Optional Google Cloud billing project for live OpenSSF public BigQuery dataset lookup (bq pre-authenticated)"
+    required: false
+    default: ""
+  timeout:
+    description: "Timeout per external provider in seconds (1..120)"
+    required: false
+    default: "20"
+  output:
+    description: "Path for normalized assessment JSON output"
+    required: false
+    default: ""
+outputs:
+  report:
+    description: "Absolute path to assessment JSON"
+    value: ${{ steps.scan.outputs.report }}
+  verdict:
+    description: "pass, block or incomplete"
+    value: ${{ steps.scan.outputs.verdict }}
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: bash
+      env:
+        SECURITY_SCAN_SBOM: ${{ inputs.sbom }}
+        SECURITY_SCAN_IMAGE: ${{ inputs.image }}
+        SECURITY_SCAN_TRIVY_REPORT: ${{ inputs.trivy-report }}
+        SECURITY_SCAN_PROVIDERS: ${{ inputs.providers }}
+        SECURITY_SCAN_MODE: ${{ inputs.mode }}
+        SECURITY_SCAN_FIXABLE: ${{ inputs.trivy-fixable-only }}
+        SECURITY_SCAN_SOCKET_ORG: ${{ inputs.socket-org }}
+        SOCKET_SECURITY_TOKEN: ${{ inputs.socket-token }}
+        SECURITY_SCAN_OPENSSF_JSON: ${{ inputs.openssf-json }}
+        SECURITY_SCAN_OPENSSF_PROJECT: ${{ inputs.openssf-project }}
+        SECURITY_SCAN_TIMEOUT: ${{ inputs.timeout }}
+        SECURITY_SCAN_OUTPUT: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        args=(
+          --sbom "$SECURITY_SCAN_SBOM"
+          --image "$SECURITY_SCAN_IMAGE"
+          --trivy-report "$SECURITY_SCAN_TRIVY_REPORT"
+          --providers "$SECURITY_SCAN_PROVIDERS"
+          --mode "$SECURITY_SCAN_MODE"
+          --socket-org "$SECURITY_SCAN_SOCKET_ORG"
+          --openssf-json "$SECURITY_SCAN_OPENSSF_JSON"
+          --openssf-project "$SECURITY_SCAN_OPENSSF_PROJECT"
+          --timeout "$SECURITY_SCAN_TIMEOUT"
+          --output "${SECURITY_SCAN_OUTPUT:-$RUNNER_TEMP/cordillera-security-scan.json}"
+        )
+        case "$SECURITY_SCAN_FIXABLE" in
+          true) args+=(--trivy-fixable-only) ;;
+          false) ;;
+          *) echo "::error::trivy-fixable-only must be true or false"; exit 2 ;;
+        esac
+        python3 "$GITHUB_ACTION_PATH/scan.py" "${args[@]}"

@@ -130,6 +130,16 @@ what a valid signature does not prove.
 
 The full rules: [docs/update-policy.md](docs/update-policy.md).
 
+## Public reusable security scan
+
+The [security-scan composite GitHub Action](actions/security-scan/README.md) can
+assess a CycloneDX image SBOM using existing Trivy findings alongside optional
+Socket supply-chain alerts and OpenSSF package-behavior observations. It emits a
+separate, versioned assessment with explicit coverage status and retains the
+canonical reproducible SBOM unchanged. Its external intelligence providers are
+report-only during initial integration; existing image publication gates remain
+authoritative.
+
 ## Known limits
 
 - **Trivy cannot see the libraries inside `node`.** A CVE in the bundled
