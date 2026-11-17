@@ -217,9 +217,12 @@ class IntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "sbom.json"
             p.write_text(json.dumps(sbom()))
+            out = Path(td) / "out"
+            out.write_text("stale green assessment")
             with mock.patch.object(sys, "argv", ["scan.py", "--sbom", str(p),
-                            "--providers", "trivy,random", "--output", str(Path(td) / "out")]):
+                            "--providers", "trivy,random", "--output", str(out)]):
                 self.assertEqual(scan.main(), 2)
+            self.assertFalse(out.exists(), "failed rescans must invalidate old reports")
 
 
 if __name__ == "__main__":
