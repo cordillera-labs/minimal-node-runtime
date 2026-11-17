@@ -97,7 +97,7 @@ class SocketTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *_): return False
             def read(self, _):
-                return b'{"type":"npm","name":"example","version":"4.2.1","alerts":[]}\\n'
+                return b'{"type":"npm","name":"example","version":"4.2.1","alerts":[]}\n'
         def urlopen(request, timeout):
             self.assertEqual(request.get_method(), "POST")
             self.assertIn("/orgs/my-org/purl?", request.full_url)
