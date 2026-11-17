@@ -361,7 +361,7 @@ def main():
     parser.add_argument("--mode", choices=("report", "enforce"), default="report")
     parser.add_argument("--trivy-fixable-only", action="store_true", default=False)
     parser.add_argument("--socket-org", default="")
-    parser.add_argument("--socket-token", default="")
+    parser.add_argument("--socket-token", default=os.getenv("SOCKET_SECURITY_TOKEN", ""))
     parser.add_argument("--openssf-json", default="")
     parser.add_argument("--openssf-project", default="")
     parser.add_argument("--timeout", type=int, default=20)
