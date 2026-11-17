@@ -376,10 +376,17 @@ def main():
     if not 1 <= args.timeout <= 120:
         parser.error("timeout must be between 1 and 120 seconds")
     try:
-        report = run(args)
         output = Path(args.output)
+        # Do not leave a previous successful assessment after a failed rescan.
+        output.unlink(missing_ok=True)
+        report = run(args)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        staging = output.with_name(output.name + ".tmp-" + str(os.getpid()))
+        try:
+            staging.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            os.replace(staging, output)
+        finally:
+            staging.unlink(missing_ok=True)
         for p, assessment in report["providers"].items():
             print(p + ": " + assessment["status"] +
                   " (covered " + str(assessment["covered"]) +
