@@ -216,7 +216,7 @@ jobs:
       - name: Exercise public reusable security-scan action on this image
         # Evidence enrichment is report-only while external providers are
         # configured and validated. Existing Trivy and image gates still block.
-        uses: ./actions/security-scan
+        uses: $/actions/security-scan
         with:
           sbom: ${{ runner.temp }}/work/sbom.cdx.json
           trivy-report: ${{ runner.temp }}/work/scan.json
