@@ -148,7 +148,9 @@ def socket_result(packages, rows):
             missing.append(key)
             continue
         for alert in alerts:
-            severity = str(alert.get("severity", "unknown")).lower()
+            raw_severity = str(alert.get("severity", "unknown")).lower()
+            severity = {"0": "low", "1": "medium", "2": "high", "3": "critical"}.get(
+                raw_severity, raw_severity)
             action = str(alert.get("action", ""))
             kind = str(alert.get("type", "unknown"))
             block = action == "error" or severity in ("critical", "high")
