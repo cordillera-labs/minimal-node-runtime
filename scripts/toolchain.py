@@ -282,9 +282,10 @@ def issue_body(result):
     lines += [
         "",
         "The hourly routine updater proposes one-pin pull requests after this cooldown.",
-        "Same-major updates receive full CI and can merge automatically; major changes require",
-        "manual review. Image pins change tag and immutable digest together. BuildKit and",
-        "buildx are updated separately, since they can change reproducible image digests.",
+        "All toolchain upgrades, including major releases, require full exact-head CI",
+        "and can merge automatically when it passes. Cosign must additionally verify",
+        "a real published signature and vulnerability attestation. Image pins change",
+        "tag and immutable digest together; BuildKit and buildx change separately.",
         "",
         "This issue closes when the pin reaches the eligible release.",
     ]
