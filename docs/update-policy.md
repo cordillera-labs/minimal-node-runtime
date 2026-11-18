@@ -346,7 +346,8 @@ with `GITHUB_TOKEN`, which do not generate follow-on push workflows. The
 image lock and CA observation commits do not match this push filter. Changes
 to the `update.yml` workflow itself also trigger one reevaluation, including
 when an updater repair is merged while a previously validated pin awaits
-publication.
+publication. A change to `scripts/toolchain-routine.sh` also triggers a
+reevaluation so new adoption policy takes effect without waiting for cron.
 Missing/failed CI, unexpected drift or merge-protection errors leave the PR
 open and create a `toolchain-routine-failure` issue.
 
