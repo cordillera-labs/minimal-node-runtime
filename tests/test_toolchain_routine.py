@@ -113,7 +113,7 @@ class PinChange(unittest.TestCase):
                               "moby/buildkit:v0.34.2@sha256:" + "c" * 64)
         self.assertFalse(routine.changed_pin(before, good, "buildkit")["major_change"])
 
-    def test_major_is_proposed_but_not_treated_as_auto_merge(self):
+    def test_major_is_recorded_and_retains_strict_single_pin_validation(self):
         before = contents()
         after = before.replace(OLD["COSIGN_IMAGE"],
                                "gcr.io/projectsigstore/cosign:v3.1.4@sha256:" + "c" * 64)
