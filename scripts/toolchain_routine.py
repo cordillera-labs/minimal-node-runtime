@@ -135,8 +135,8 @@ def rebase_verified_pin(original_base, proposal, current_main, name):
     current_pins = parse_pins(current_main)
     if current_pins.get(key) != old_raw:
         raise ValueError("target tool pin changed on main; cannot rebase")
-    old_line = f"{key}={old_raw}\\n"
-    new_line = f"{key}={new_raw}\\n"
+    old_line = f"{key}={old_raw}\n"
+    new_line = f"{key}={new_raw}\n"
     if current_main.count(old_line) != 1:
         raise ValueError("target tool pin line is missing or duplicated")
     rebased = current_main.replace(old_line, new_line, 1)
