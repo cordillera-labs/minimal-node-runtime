@@ -261,7 +261,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          export COSIGN_IMAGE="$(sed -n 's/^COSIGN_IMAGE=//p' toolchain.env)"
+          COSIGN_IMAGE="$(sed -n 's/^COSIGN_IMAGE=//p' toolchain.env)"
+          export COSIGN_IMAGE
           image_repository=$(sed -n 's/^IMAGE_REPOSITORY=//p' toolchain.env)
           digest=$(python3 scripts/lock.py get state/22/stable.lock PUBLISHED_DIGEST)
           [[ "$COSIGN_IMAGE" =~ ^gcr\.io/projectsigstore/cosign:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
