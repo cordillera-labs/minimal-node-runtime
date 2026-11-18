@@ -155,11 +155,11 @@ class PinChange(unittest.TestCase):
         proposed = original.replace("BUILDX_VERSION=v0.37.2", "BUILDX_VERSION=v0.38.2")
         latest = original.replace("TRIVY_VERSION=v0.74.0", "TRIVY_VERSION=v0.76.2")
         with self.assertRaisesRegex(ValueError, "unrelated changes"):
-            routine.rebase_verified_pin(original, proposed + "# surprise\\n", latest, "buildx")
+            routine.rebase_verified_pin(original, proposed + "# surprise\n", latest, "buildx")
         with self.assertRaisesRegex(ValueError, "exactly one"):
             routine.rebase_verified_pin(original, original, latest, "buildx")
         with self.assertRaisesRegex(ValueError, "pin keys changed"):
-            routine.rebase_verified_pin(original, proposed, latest + "UNKNOWN=1\\n", "buildx")
+            routine.rebase_verified_pin(original, proposed, latest + "UNKNOWN=1\n", "buildx")
         self.assertEqual(routine.rebase_verified_pin(original, proposed, latest, "buildx"),
                          latest.replace("BUILDX_VERSION=v0.37.2", "BUILDX_VERSION=v0.38.2"))
 
