@@ -119,6 +119,73 @@ class PinChange(unittest.TestCase):
                                "gcr.io/projectsigstore/cosign:v3.1.4@sha256:" + "c" * 64)
         self.assertTrue(routine.changed_pin(before, after, "cosign")["major_change"])
 
+    def test_rebase_major_cosign_pin_over_independent_tool_upgrades(self):
+        original = contents()
+        new_cosign = "gcr.io/projectsigstore/cosign:v3.1.4@sha256:" + "c" * 64
+        proposed = original.replace(OLD["COSIGN_IMAGE"], new_cosign)
+        current = (original
+                   .replace(OLD["BUILDKIT_IMAGE"],
+                            "moby/buildkit:v0.35.0@sha256:" + "d" * 64)
+                   .replace("BUILDX_VERSION=v0.37.2", "BUILDX_VERSION=v0.39.0")
+                   .replace("TRIVY_VERSION=v0.74.0", "TRIVY_VERSION=v0.77.1"))
+        rebased = routine.rebase_verified_pin(original, proposed, current, "cosign")
+        self.assertEqual(rebased, current.replace(OLD["COSIGN_IMAGE"], new_cosign))
+        self.assertEqual(routine.changed_pin(current, rebased, "cosign"),
+                         {"tool": "cosign", "from": "v2.6.1",
+                          "to": "v3.1.4", "major_change": True})
+
+    def test_rebase_rejects_same_tool_version_or_digest_changes(self):
+        original = contents()
+        proposed = original.replace(
+            OLD["COSIGN_IMAGE"],
+            "gcr.io/projectsigstore/cosign:v3.1.4@sha256:" + "c" * 64)
+        for current in (
+            original.replace(OLD["COSIGN_IMAGE"],
+                             "gcr.io/projectsigstore/cosign:v2.6.1@sha256:" + "d" * 64),
+            original.replace(OLD["COSIGN_IMAGE"],
+                             "gcr.io/projectsigstore/cosign:v2.6.5@sha256:" + "d" * 64),
+            proposed,
+        ):
+            with self.subTest(current=current), self.assertRaisesRegex(
+                    ValueError, "target tool pin changed"):
+                routine.rebase_verified_pin(original, proposed, current, "cosign")
+
+    def test_rebase_rejects_unrelated_or_malformed_proposals(self):
+        original = contents()
+        proposed = original.replace("BUILDX_VERSION=v0.37.2", "BUILDX_VERSION=v0.38.2")
+        latest = original.replace("TRIVY_VERSION=v0.74.0", "TRIVY_VERSION=v0.76.2")
+        with self.assertRaisesRegex(ValueError, "unrelated changes"):
+            routine.rebase_verified_pin(original, proposed + "# surprise\\n", latest, "buildx")
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            routine.rebase_verified_pin(original, original, latest, "buildx")
+        with self.assertRaisesRegex(ValueError, "pin keys changed"):
+            routine.rebase_verified_pin(original, proposed, latest + "UNKNOWN=1\\n", "buildx")
+        self.assertEqual(routine.rebase_verified_pin(original, proposed, latest, "buildx"),
+                         latest.replace("BUILDX_VERSION=v0.37.2", "BUILDX_VERSION=v0.38.2"))
+
+    def test_rebase_cli_uses_the_same_typed_validation(self):
+        original = contents()
+        proposed = original.replace(
+            OLD["COSIGN_IMAGE"],
+            "gcr.io/projectsigstore/cosign:v3.1.4@sha256:" + "c" * 64)
+        latest = original.replace("BUILDX_VERSION=v0.37.2", "BUILDX_VERSION=v0.38.2")
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            for name, text in (("base.env", original), ("proposal.env", proposed),
+                               ("current.env", latest)):
+                (folder / name).write_text(text, encoding="utf-8")
+            out = folder / "rebased.env"
+            self.assertEqual(routine.main([
+                "toolchain_routine.py", "rebase",
+                "--base", str(folder / "base.env"),
+                "--candidate", str(folder / "proposal.env"),
+                "--current", str(folder / "current.env"),
+                "--tool", "cosign", "--out", str(out),
+            ]), 0)
+            self.assertEqual(
+                routine.changed_pin(latest, out.read_text(encoding="utf-8"), "cosign")["to"],
+                "v3.1.4")
+
     def test_apply_checks_current_pin_digest_and_plan(self):
         choice = routine.plan(monitor(), OLD, now=NOW)
         with tempfile.TemporaryDirectory() as temp:
