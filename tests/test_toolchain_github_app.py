@@ -73,7 +73,7 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('    needs: [unit, workflow-lint, build, cosign-contract]', self.ci)
         self.assertIn('COSIGN: ${{ needs.cosign-contract.result }}', self.ci)
         self.assertIn('[ "$COSIGN" = success ]', self.ci)
-        self.assertIn('permissions:\\n      contents: read\\n      packages: read', self.ci)
+        self.assertIn('permissions:\n      contents: read\n      packages: read', self.ci)
         self.assertIn('scripts/verify-published.sh signature', self.ci)
         self.assertIn('scripts/verify-published.sh vuln', self.ci)
         self.assertIn('state/22/stable.lock PUBLISHED_DIGEST', self.ci)
