@@ -74,8 +74,10 @@ silently using an unintended credential.
 3. Verify that a newly created or refreshed routine bot PR has no workflow
    approval prompt. Its usual PR-triggered checks and the explicit exact-head
    `ci.yml` dispatch can both run; the latter is the current auto-merge gate.
-4. Confirm a same-major PR only merges after the exact-head CI succeeds, then
-   check that `update.yml` was dispatched for publication.
+4. Confirm a routine toolchain PR (including major-version changes) only
+   merges after exact-head CI succeeds. The required CI also verifies an existing
+   signature and vulnerability attestation using the proposed pinned Cosign.
+   Confirm that the toolchain pin push triggers `update.yml` for publication.
 5. Separately run `toolchain-security` on `main` to verify App token
    creation. If no published direct advisory qualifies, the run is a no-op
    rather than an artificially generated security PR.
