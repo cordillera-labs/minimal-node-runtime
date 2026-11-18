@@ -52,7 +52,7 @@ adopt_when_ci_finishes() {
     fi
     echo "Watching exact-head CI $child for $head before guarded adoption."
     if timeout --kill-after=30s 660 gh run watch "$child" --exit-status; then
-        # Re-run every existing trusted PR/head/base/diff/major-version check.
+        # Re-run every trusted PR/head/base/diff/exact-head CI check.
         # Never merge merely because the watcher succeeded.
         ROUTINE_CI_REENTRY=1 bash "$0" "$report"
         return 0
@@ -90,8 +90,8 @@ open=$(gh pr list --state open --label toolchain-routine-auto --limit 100 \
 skip=''
 blocked=false
 
-# Major upgrades stay open for human review. Same-major PRs are serialized to
-# avoid flooding the reproducibility CI with simultaneous builder changes.
+# All cooldown-eligible tool upgrades, including major releases, use the same
+# exact-head full CI gate. Serialize updates to avoid flooding builder CI.
 while IFS= read -r item; do
     [[ -n "$item" ]] || continue
     number=$(jq -er .number <<<"$item")
@@ -130,7 +130,7 @@ while IFS= read -r item; do
     python3 scripts/toolchain_routine.py verify --tool "$tool" \
         --base "$work/base.env" --candidate "$work/proposed.env" > "$work/verify.json" ||
         failure "PR #$number no longer contains exactly one valid pin upgrade."
-    major=$(jq -r .major_change "$work/verify.json")
+    # The major_change field remains part of the audited pin-change record.
     [[ "$draft" == false ]] || { echo "Draft routine PR #$number: awaiting review."; blocked=true; continue; }
 
     runs=$(gh run list --workflow ci.yml --branch "$branch" \
@@ -143,19 +143,11 @@ while IFS= read -r item; do
     conclusion=$(jq -r '.conclusion // ""' <<<"$matched")
     if [[ "$status" != completed ]]; then
         echo "PR #$number exact-head full CI is $status."
-        if [[ "$major" == false ]]; then blocked=true; fi
+        blocked=true
         continue
     fi
     if [[ "$conclusion" != success ]]; then
-        if [[ "$major" == true ]]; then
-            echo "::warning::Major-version PR #$number CI finished with $conclusion; manual review required."
-            continue  # Do not starve unrelated tool updates behind a manual major.
-        fi
         failure "PR #$number exact-head full CI finished with $conclusion."
-    fi
-    if [[ "$major" == true ]]; then
-        echo "PR #$number passed CI but crosses a major version; manual review required."
-        continue
     fi
 
     # Require the exact tested PR head and successful full CI. When main
@@ -248,7 +240,7 @@ while IFS= read -r item; do
 done < <(jq -c '.[]' <<<"$open")
 
 if [[ "$blocked" == true ]]; then
-    echo 'An automatic same-major PR is awaiting CI or review; not starting another.'
+    echo 'An automatic toolchain PR is awaiting CI or review; not starting another.'
     exit 0
 fi
 
@@ -263,7 +255,7 @@ fi
 tool=$(jq -er .tool "$work/choice.json")
 old=$(jq -er .from "$work/choice.json")
 new=$(jq -er .to "$work/choice.json")
-major=$(jq -r .major_change "$work/choice.json")
+# Major-version classification is retained in the planner and PR audit record.
 git fetch --quiet origin main
 git switch -c "routine/toolchain-$tool-$new-$GITHUB_RUN_ID" origin/main
 branch=$(git branch --show-current)
@@ -297,11 +289,8 @@ git push --set-upstream origin "$branch" ||
     echo
     jq -r '"Release: " + .release_url + "\nReleased: " + .released_at' "$work/choice.json"
     echo
-    if [[ "$major" == true ]]; then
-        echo '**Major upgrade — manual review and merge required.**'
-    else
-        echo 'Same-major upgrade — the next hourly observer may merge only after exact-head full CI passes.'
-    fi
+    echo 'All toolchain versions (including major upgrades) can merge only after exact-head full CI passes.'
+    echo 'The Cosign contract gate verifies published signatures and vulnerability attestations.'
     echo 'Full CI exercises both Node lines, reproducibility, vulnerability gates, and negative controls.'
     echo 'Only toolchain.env changes; immutable registry digests are included for image pins.'
     echo "Monitor: $RUN_URL"
@@ -313,6 +302,4 @@ GH_TOKEN="$pr_token" gh pr create --base main --head "$branch" \
 gh workflow run ci.yml --ref "$branch" ||
     failure "Created the $tool PR but full CI dispatch failed."
 echo "Created routine $tool $new PR and explicitly dispatched full CI."
-if [[ "$major" == false ]]; then
-    adopt_when_ci_finishes "$branch" "$(git rev-parse HEAD)"
-fi
+adopt_when_ci_finishes "$branch" "$(git rev-parse HEAD)"

@@ -328,8 +328,8 @@ exact-head CI. The list is fixed, not a permissive directory wildcard.
 The updater now waits (with an explicit time limit) for the exact-head
 `workflow_dispatch` CI it just started. On success, it **re-enters the full
 adoption gate in the same workflow run**, verifies the PR author, exact head,
-one-pin diff, drift, and CI result again, then squash-merges a same-major
-update without administrator bypass. It does not need a second hourly run
+one-pin diff, drift, and CI result again, then squash-merges an eligible
+tool upgrade (including major releases) without administrator bypass. It does not need a second hourly run
 merely to notice the CI has finished. If runners remain queued beyond the
 bound, it leaves the PR open for the next scheduled check; failures and
 unexpected drift are still fail-closed.
@@ -346,15 +346,24 @@ with `GITHUB_TOKEN`, which do not generate follow-on push workflows. The
 image lock and CA observation commits do not match this push filter. Changes
 to the `update.yml` workflow itself also trigger one reevaluation, including
 when an updater repair is merged while a previously validated pin awaits
-publication.
+publication. A change to `scripts/toolchain-routine.sh` also triggers a
+reevaluation so new adoption policy takes effect without waiting for cron.
 Missing/failed CI, unexpected drift or merge-protection errors leave the PR
 open and create a `toolchain-routine-failure` issue.
 
-**Major upgrades**, including Cosign v2 → v3, are proposed with their own PR
-and receive the same CI, but **never auto-merge**; a maintainer must review
-compatibility and merge them. One same-major PR at a time limits expensive
-parallel reproducibility builds. A pending major PR does not block other
-eligible tool updates. The security updater takes precedence over this lane;
+**Toolchain major upgrades** follow the same automatic adoption policy as
+minor upgrades. These tools execute in the build, scanning, signing and
+publication pipeline rather than shipping in the runtime root filesystem.
+Version numbers alone are not compatibility evidence: the full read-only CI
+must pass, including reproducibility and negative controls for both Node lines,
+plus a real signature *and vulnerability-attestation verification* with the
+candidate pinned Cosign image against an existing published digest. This
+also catches broken signing-tool verification contracts before adoption.
+New signature creation still goes through the production publication gate.
+Failed CI, failed contract verification or ambiguous metadata blocks adoption.
+
+All routine pin PRs are serialized to limit expensive parallel builds.
+The security updater takes precedence over this lane;
 both mutation jobs share a concurrency group. If a security PR changes `main`
 while routine CI runs, that routine PR cannot auto-merge without fresh
 validation. Repository Actions permissions must allow bot-created PRs.

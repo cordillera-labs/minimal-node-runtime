@@ -16,6 +16,7 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         cls.update = (ROOT / ".github/workflows/update.yml").read_text(encoding="utf-8")
         cls.security = (ROOT / ".github/workflows/toolchain-security.yml").read_text(encoding="utf-8")
         cls.routine = (ROOT / "scripts/toolchain-routine.sh").read_text(encoding="utf-8")
+        cls.ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
     def test_app_token_is_scoped_to_one_repo_and_two_permissions(self):
         for content in (self.update, self.security):
@@ -55,9 +56,33 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('GH_TOKEN="$pr_token" gh pr merge "$number"', self.routine)
         self.assertIn('--match-head-commit "$head"', self.routine)
 
+    def test_major_toolchain_upgrade_adopts_only_after_exact_head_ci(self):
+        # A semantic major bump is not an automatic blocker for build tooling.
+        # Every release, including major, must retain exact-head CI and strict
+        # single pin/immutable registry digest verification before merge.
+        self.assertNotIn('if [[ "$major" == true ]]', self.routine)
+        self.assertNotIn('if [[ "$major" == false ]]', self.routine)
+        self.assertIn('python3 scripts/toolchain_routine.py verify --tool "$tool"', self.routine)
+        self.assertIn('--match-head-commit "$head"', self.routine)
+        self.assertIn('if [[ "$conclusion" != success ]]', self.routine)
+        self.assertTrue(self.routine.rstrip().endswith(
+            'adopt_when_ci_finishes "$branch" "$(git rev-parse HEAD)"'))
+
+    def test_cosign_contract_is_part_of_required_full_ci(self):
+        self.assertIn('  cosign-contract:', self.ci)
+        self.assertIn('    needs: [unit, workflow-lint, build, cosign-contract]', self.ci)
+        self.assertIn('COSIGN: ${{ needs.cosign-contract.result }}', self.ci)
+        self.assertIn('[ "$COSIGN" = success ]', self.ci)
+        self.assertIn('permissions:\n      contents: read\n      packages: read', self.ci)
+        self.assertIn('scripts/verify-published.sh signature', self.ci)
+        self.assertIn('scripts/verify-published.sh vuln', self.ci)
+        self.assertIn('state/22/stable.lock PUBLISHED_DIGEST', self.ci)
+        self.assertIn('COSIGN_IMAGE="$(sed -n', self.ci)
+
     def test_toolchain_pin_push_publishes_without_recursive_record_commits(self):
         self.assertIn('  push:\n    branches: [main]\n    paths:\n      - toolchain.env\n      - .github/workflows/update.yml', self.update)
         self.assertIn('    - cron:', self.update)
+        self.assertIn('      - scripts/toolchain-routine.sh', self.update)
         self.assertIn('  workflow_dispatch:', self.update)
         self.assertIn('gh workflow run update.yml --ref main', self.routine)
 

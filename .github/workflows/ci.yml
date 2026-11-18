@@ -239,10 +239,43 @@ jobs:
             docker buildx rm --force "$name" >/dev/null 2>&1 || true
           done
 
+  cosign-contract:
+    # Cosign is not shipped in the runtime image, but it signs and attests
+    # production artifacts. Exercise the candidate pinned image as a consumer
+    # against the existing signed/attested stable digest on every PR.
+    # This must also pass for major Cosign upgrades; no manual approval solely
+    # for version-number changes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify existing image signature and vulnerability attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COSIGN_IMAGE="$(sed -n 's/^COSIGN_IMAGE=//p' toolchain.env)"
+          export COSIGN_IMAGE
+          image_repository=$(sed -n 's/^IMAGE_REPOSITORY=//p' toolchain.env)
+          digest=$(python3 scripts/lock.py get state/22/stable.lock PUBLISHED_DIGEST)
+          [[ "$COSIGN_IMAGE" =~ ^gcr\.io/projectsigstore/cosign:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
+          [[ "$image_repository" == "ghcr.io/$GITHUB_REPOSITORY" ]]
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >/dev/null
+          scripts/verify-published.sh signature "$image_repository@$digest"
+          scripts/verify-published.sh vuln "$image_repository@$digest"
+
   check:
-    # The one status to require: unit tests, the workflow lint and every line's
-    # build passed.
-    needs: [unit, workflow-lint, build]
+    # The one status to require: unit tests, workflow lint, Cosign's real
+    # signature/attestation contract and every Node line's build passed.
+    needs: [unit, workflow-lint, build, cosign-contract]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -253,6 +286,7 @@ jobs:
           UNIT: ${{ needs.unit.result }}
           LINT: ${{ needs.workflow-lint.result }}
           BUILD: ${{ needs.build.result }}
+          COSIGN: ${{ needs.cosign-contract.result }}
         run: |
-          echo "unit: $UNIT, workflow-lint: $LINT, build: $BUILD"
-          [ "$UNIT" = success ] && [ "$LINT" = success ] && [ "$BUILD" = success ]
+          echo "unit: $UNIT, workflow-lint: $LINT, build: $BUILD, cosign-contract: $COSIGN"
+          [ "$UNIT" = success ] && [ "$LINT" = success ] && [ "$BUILD" = success ] && [ "$COSIGN" = success ]
