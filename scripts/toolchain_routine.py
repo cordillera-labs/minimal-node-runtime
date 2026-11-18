@@ -130,9 +130,12 @@ def rebase_verified_pin(original_base, proposal, current_main, name):
     """
     approved = changed_pin(original_base, proposal, name)
     key = next(k for k, (tool, _, _) in toolchain.TOOLS.items() if tool == name)
-    old_raw = parse_pins(original_base)[key]
+    original_pins = parse_pins(original_base)
+    old_raw = original_pins[key]
     new_raw = parse_pins(proposal)[key]
     current_pins = parse_pins(current_main)
+    if set(current_pins) != set(original_pins):
+        raise ValueError("pin keys changed on main; cannot rebase")
     if current_pins.get(key) != old_raw:
         raise ValueError("target tool pin changed on main; cannot rebase")
     old_line = f"{key}={old_raw}\n"
