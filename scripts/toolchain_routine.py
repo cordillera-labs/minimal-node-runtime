@@ -119,6 +119,36 @@ def parse_pins(data):
     return pins
 
 
+def rebase_verified_pin(original_base, proposal, current_main, name):
+    """Replay exactly one audited pin onto main; never cherry-pick text hunks.
+
+    BuildKit, Buildx, Cosign and Trivy update independently. Git cherry-pick
+    may conflict when other toolchain.env lines changed, even though the pin
+    being upgraded is identical. Validate the old PR against its *original*
+    base, require the current target raw pin (including digest) to match that
+    original base, and regenerate a new single-pin candidate from current main.
+    """
+    approved = changed_pin(original_base, proposal, name)
+    key = next(k for k, (tool, _, _) in toolchain.TOOLS.items() if tool == name)
+    original_pins = parse_pins(original_base)
+    old_raw = original_pins[key]
+    new_raw = parse_pins(proposal)[key]
+    current_pins = parse_pins(current_main)
+    if set(current_pins) != set(original_pins):
+        raise ValueError("pin keys changed on main; cannot rebase")
+    if current_pins.get(key) != old_raw:
+        raise ValueError("target tool pin changed on main; cannot rebase")
+    old_line = f"{key}={old_raw}\n"
+    new_line = f"{key}={new_raw}\n"
+    if current_main.count(old_line) != 1:
+        raise ValueError("target tool pin line is missing or duplicated")
+    rebased = current_main.replace(old_line, new_line, 1)
+    refreshed = changed_pin(current_main, rebased, name)
+    if refreshed != approved:
+        raise ValueError("rebased proposal changes the verified tool upgrade")
+    return rebased
+
+
 def apply(choice, path, digest=None):
     if not isinstance(choice, dict) or choice.get("tool") not in ORDER:
         raise ValueError("missing routine update plan")
@@ -166,6 +196,12 @@ def main(argv):
     v.add_argument("--base", required=True)
     v.add_argument("--candidate", required=True)
     v.add_argument("--tool", choices=ORDER, required=True)
+    r = subs.add_parser("rebase")
+    r.add_argument("--base", required=True, help="original verified parent pin file")
+    r.add_argument("--candidate", required=True, help="original verified PR pin file")
+    r.add_argument("--current", required=True, help="pin file at current main")
+    r.add_argument("--tool", choices=ORDER, required=True)
+    r.add_argument("--out", required=True)
     args = parser.parse_args(argv[1:])
     try:
         if args.command == "plan":
@@ -184,7 +220,15 @@ def main(argv):
                 base = handle.read()
             with open(args.candidate, encoding="utf-8") as handle:
                 candidate = handle.read()
-            print(json.dumps(changed_pin(base, candidate, args.tool)))
+            if args.command == "rebase":
+                with open(args.current, encoding="utf-8") as handle:
+                    current = handle.read()
+                rebased = rebase_verified_pin(base, candidate, current, args.tool)
+                with open(args.out, "w", encoding="utf-8") as handle:
+                    handle.write(rebased)
+                print(json.dumps(changed_pin(current, rebased, args.tool)))
+            else:
+                print(json.dumps(changed_pin(base, candidate, args.tool)))
     except (ValueError, OSError, KeyError, TypeError) as exc:
         print(f"toolchain-routine: {exc}", file=sys.stderr)
         return 1

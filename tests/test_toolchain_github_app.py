@@ -79,6 +79,14 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('state/22/stable.lock PUBLISHED_DIGEST', self.ci)
         self.assertIn('COSIGN_IMAGE="$(sed -n', self.ci)
 
+    def test_stale_toolchain_pr_replays_one_typed_pin_not_text_cherry_pick(self):
+        # Independent tool pin upgrades legitimately alter nearby lines.
+        # Text cherry-pick conflicts are not evidence of a changed target pin.
+        self.assertIn('python3 scripts/toolchain_routine.py rebase --tool "$tool"', self.routine)
+        self.assertNotIn('git cherry-pick --no-commit "$head"', self.routine)
+        self.assertIn('python3 scripts/toolchain_routine.py verify --tool "$tool"', self.routine)
+        self.assertIn('--force-with-lease="refs/heads/$branch:$head"', self.routine)
+
     def test_toolchain_pin_push_publishes_without_recursive_record_commits(self):
         self.assertIn('  push:\n    branches: [main]\n    paths:\n      - toolchain.env\n      - .github/workflows/update.yml', self.update)
         self.assertIn('    - cron:', self.update)

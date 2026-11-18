@@ -324,6 +324,12 @@ build-inert observation records `state/trust/chrome.json`,
 exclusions (`certificates.auto.exclude`), tool pins, locks, build scripts,
 workflow definitions and every other file require a refreshed PR and **new**
 exact-head CI. The list is fixed, not a permissive directory wildcard.
+Refreshing a stale PR **replays its already-verified single typed pin** over
+the current `toolchain.env`, not a textual git cherry-pick. This tolerates
+independent BuildKit, Buildx, Cosign, and Trivy upgrades while strictly
+requiring the target pin's original tag **and digest** to be unchanged,
+the pin key set to be identical, and the refreshed change to be exactly the
+same verified version/digest update. Otherwise adoption fails closed.
 
 The updater now waits (with an explicit time limit) for the exact-head
 `workflow_dispatch` CI it just started. On success, it **re-enters the full
