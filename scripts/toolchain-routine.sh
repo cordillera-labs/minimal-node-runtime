@@ -181,14 +181,22 @@ while IFS= read -r item; do
             failure "Cannot fetch current main or routine PR #$number."
         git switch --detach origin/main ||
             failure "Cannot switch to current main for PR #$number."
-        git cherry-pick --no-commit "$head" ||
-            failure "PR #$number pin conflicts with newer main; cannot refresh automatically."
-        [[ "$(git diff --cached --name-only)" == toolchain.env ]] ||
-            failure "Refreshed PR #$number changes files other than toolchain.env."
+        # Git cherry-pick can conflict on toolchain.env when *other* pinned
+        # tools advanced since this PR was created. Replay the already
+        # verified, single typed pin instead, never arbitrary conflict
+        # resolution. The target raw pin (tag AND digest) must still equal
+        # the original parent; otherwise fail closed.
         git show HEAD:toolchain.env > "$work/refreshed-base.env" ||
             failure "Cannot read refreshed base for PR #$number."
-        git show :toolchain.env > "$work/refreshed-proposed.env" ||
-            failure "Cannot read refreshed pin for PR #$number."
+        python3 scripts/toolchain_routine.py rebase --tool "$tool" \
+            --base "$work/base.env" --candidate "$work/proposed.env" \
+            --current "$work/refreshed-base.env" \
+            --out "$work/refreshed-proposed.env" ||
+            failure "PR #$number cannot rebase its verified pin onto current main."
+        cp "$work/refreshed-proposed.env" toolchain.env
+        git add -- toolchain.env
+        [[ "$(git diff --cached --name-only)" == toolchain.env ]] ||
+            failure "Refreshed PR #$number changes files other than toolchain.env."
         python3 scripts/toolchain_routine.py verify --tool "$tool" \
             --base "$work/refreshed-base.env" \
             --candidate "$work/refreshed-proposed.env" > "$work/refreshed-verify.json" ||
