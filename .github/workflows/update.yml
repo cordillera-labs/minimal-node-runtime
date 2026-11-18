@@ -18,14 +18,15 @@ run-name: ${{ inputs.distrust_run_id && format('CA distrust {0}', inputs.distrus
 on:
   # An App-authored toolchain pin merge should rebuild/publish immediately,
   # without depending on a possibly delayed hourly schedule. Also re-evaluate
-  # when the publishing workflow itself changes, to pick up a recovered pin
-  # awaiting release. Published line-state and CA observer commits never match
-  # these narrow paths, so recording image state cannot recurse.
+  # when the publishing workflow or routine updater policy changes, to
+  # pick up previously blocked pins without waiting for a delayed schedule.
+  # Published line-state and CA observer commits never match these paths.
   push:
     branches: [main]
     paths:
       - toolchain.env
       - .github/workflows/update.yml
+      - scripts/toolchain-routine.sh
   schedule:
     # Minute 17: GitHub documents the start of the hour as its peak load.
     - cron: '17 * * * *'
