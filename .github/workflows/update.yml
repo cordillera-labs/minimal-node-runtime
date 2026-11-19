@@ -27,6 +27,7 @@ on:
       - toolchain.env
       - .github/workflows/update.yml
       - scripts/toolchain-routine.sh
+      - scripts/verify-published.sh
   schedule:
     # Minute 17: GitHub documents the start of the hour as its peak load.
     - cron: '17 * * * *'
