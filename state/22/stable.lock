@@ -2,8 +2,8 @@
 # The hourly update workflow writes this file after a successful publish.
 # Edit it by hand only to roll back, and expect the next run to re-evaluate it.
 CHANNEL=stable
-EVALUATED_AT=2026-11-18T22:21:32Z
-BUILD_DEFINITION_SHA256=3c5b2a6e93d4da7f7e813f957de422dff1c6091ceb533bb76ff712e6dd732358
+EVALUATED_AT=2026-11-19T00:15:36Z
+BUILD_DEFINITION_SHA256=4cb1b13c9f2735ba9a5df9b4b12aa5a09a0e4598a40438491dc1baadd7b1ea8c
 BUILD_DEFINITION_ACCEPTED=repository change
 SOURCE_DATE_EPOCH=1794355200
 HELPER_IMAGE=docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
