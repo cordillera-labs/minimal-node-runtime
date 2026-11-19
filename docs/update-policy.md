@@ -355,7 +355,11 @@ when an updater repair is merged while a previously validated pin awaits
 publication. A change to `scripts/toolchain-routine.sh` also triggers a
 reevaluation so new adoption policy takes effect without waiting for cron.
 Missing/failed CI, unexpected drift or merge-protection errors leave the PR
-open and create a `toolchain-routine-failure` issue.
+open and create a `toolchain-routine-failure` issue. When an old PR's exact-head
+CI fails but `main` has since gained material verifier/build changes, the
+observer may replay its unchanged verified pin onto the new base and run
+**new exact-head CI**. An unchanged or observation-only base still rejects the
+failed CI, and a failed new run can never merge.
 
 **Toolchain major upgrades** follow the same automatic adoption policy as
 minor upgrades. These tools execute in the build, scanning, signing and
