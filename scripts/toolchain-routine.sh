@@ -146,10 +146,11 @@ while IFS= read -r item; do
         blocked=true
         continue
     fi
-    if [[ "$conclusion" != success ]]; then
-        failure "PR #$number exact-head full CI finished with $conclusion."
-    fi
-
+    # Do not treat a failed result from an *obsolete* base as final.
+    # A newer main may include the compatibility repair. Inspect drift and
+    # replay the verified single pin if the change is build-relevant.
+    # A failed result on the current/relevantly unchanged base still blocks
+    # the merge below, without bypass or exception.
     # Require the exact tested PR head and successful full CI. When main
     # advances, accept only explicitly build-inert observation-state commits;
     # those cannot alter the image build definition, pinned line inputs, CI,
@@ -220,6 +221,13 @@ while IFS= read -r item; do
         adopt_when_ci_finishes "$branch" "$(git rev-parse HEAD)"
         exit 0
     fi
+    # If this head has failed CI and main has no material changes to retest,
+    # do not merge it. Moving this gate after the verified refresh decision
+    # allows a repaired CI workflow or verifier on main to recover a red PR.
+    if [[ "$conclusion" != success ]]; then
+        failure "PR #$number exact-head full CI finished with $conclusion."
+    fi
+
     # Confirm main did not move during our drift inspection. The PR head
     # match protects the CI result; the main match protects our drift verdict.
     merge_main=$(gh api "repos/$GH_REPO/branches/main" --jq .commit.sha)
