@@ -355,7 +355,11 @@ when an updater repair is merged while a previously validated pin awaits
 publication. A change to `scripts/toolchain-routine.sh` also triggers a
 reevaluation so new adoption policy takes effect without waiting for cron.
 Missing/failed CI, unexpected drift or merge-protection errors leave the PR
-open and create a `toolchain-routine-failure` issue.
+open and create a `toolchain-routine-failure` issue. When an old PR's exact-head
+CI fails but `main` has since gained material verifier/build changes, the
+observer may replay its unchanged verified pin onto the new base and run
+**new exact-head CI**. An unchanged or observation-only base still rejects the
+failed CI, and a failed new run can never merge.
 
 **Toolchain major upgrades** follow the same automatic adoption policy as
 minor upgrades. These tools execute in the build, scanning, signing and
@@ -367,6 +371,13 @@ candidate pinned Cosign image against an existing published digest. This
 also catches broken signing-tool verification contracts before adoption.
 New signature creation still goes through the production publication gate.
 Failed CI, failed contract verification or ambiguous metadata blocks adoption.
+Historical production digests signed under Cosign v2 hold vulnerability
+attestations in the legacy `sha256-<digest>.att` form. The Cosign contract
+CI verifies those with explicit `--new-bundle-format=false`, preserving
+certificate identity, issuer and digest checks. The ordinary publication
+`vuln` verification keeps the default format to support new OCI 1.1
+bundle-format attestations. Missing or invalid attestations are never
+silently accepted as successful verification.
 
 All routine pin PRs are serialized to limit expensive parallel builds.
 The security updater takes precedence over this lane;

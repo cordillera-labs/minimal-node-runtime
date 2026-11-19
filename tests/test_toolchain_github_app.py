@@ -75,7 +75,7 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('[ "$COSIGN" = success ]', self.ci)
         self.assertIn('permissions:\n      contents: read\n      packages: read', self.ci)
         self.assertIn('scripts/verify-published.sh signature', self.ci)
-        self.assertIn('scripts/verify-published.sh vuln', self.ci)
+        self.assertIn('scripts/verify-published.sh legacy-vuln', self.ci)
         self.assertIn('state/22/stable.lock PUBLISHED_DIGEST', self.ci)
         self.assertIn('COSIGN_IMAGE="$(sed -n', self.ci)
 
@@ -87,10 +87,25 @@ class ToolchainGitHubAppWiring(unittest.TestCase):
         self.assertIn('python3 scripts/toolchain_routine.py verify --tool "$tool"', self.routine)
         self.assertIn('--force-with-lease="refs/heads/$branch:$head"', self.routine)
 
+    def test_failed_ci_can_retest_after_material_base_fix_but_cannot_merge(self):
+        # Red CI must not merge, but it must not prevent a newer main with
+        # a real compatibility repair from refreshing and revalidating the PR.
+        inspect_drift = self.routine.index('current_main=$(gh api "repos/$GH_REPO/branches/main"')
+        refresh = self.routine.index('    if [[ "$needs_refresh" == true ]]; then')
+        failure = self.routine.index('    if [[ "$conclusion" != success ]]; then')
+        merge = self.routine.index('GH_TOKEN="$pr_token" gh pr merge')
+        self.assertLess(inspect_drift, refresh)
+        self.assertLess(refresh, failure)
+        self.assertLess(failure, merge)
+        self.assertIn('python3 scripts/toolchain_observation_drift.py', self.routine)
+        self.assertIn('python3 scripts/toolchain_routine.py rebase --tool "$tool"', self.routine)
+        self.assertIn('gh workflow run ci.yml --ref "$branch"', self.routine)
+
     def test_toolchain_pin_push_publishes_without_recursive_record_commits(self):
         self.assertIn('  push:\n    branches: [main]\n    paths:\n      - toolchain.env\n      - .github/workflows/update.yml', self.update)
         self.assertIn('    - cron:', self.update)
         self.assertIn('      - scripts/toolchain-routine.sh', self.update)
+        self.assertIn('      - scripts/verify-published.sh', self.update)
         self.assertIn('  workflow_dispatch:', self.update)
         self.assertIn('gh workflow run update.yml --ref main', self.routine)
 

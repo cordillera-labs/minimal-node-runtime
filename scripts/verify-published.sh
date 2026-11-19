@@ -23,6 +23,12 @@ cosign() {
 case "$check" in
     signature) cosign verify ;;
     vuln) cosign verify-attestation --type vuln ;;
+    # Historical v2 vulnerability attestations live under sha256-<digest>.att.
+    # With v3, modern OCI referrers can mask those legacy attachments in the
+    # default lookup. Require explicit legacy selection while retaining the
+    # exact same certificate identity, OIDC issuer and digest verification.
+    # Production "vuln" stays on the modern default for newly signed images.
+    legacy-vuln) cosign verify-attestation --type vuln --new-bundle-format=false ;;
     provenance) gh attestation verify "oci://$reference" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer" ;;
     sbom)
         gh attestation verify "oci://$reference" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer" \
