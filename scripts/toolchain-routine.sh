@@ -169,7 +169,7 @@ while IFS= read -r item; do
         [[ "$fetched_main" == "$current_main" ]] ||
             failure "Main advanced while examining PR #$number; retry on next run."
         if python3 scripts/toolchain_observation_drift.py "$parent" "$current_main"; then
-            echo "PR #$number has only build-inert observation drift; preserving green exact-head CI."
+            echo "PR #$number has only build-inert observation drift; preserving the exact-head CI verdict."
         else
             needs_refresh=true
         fi
