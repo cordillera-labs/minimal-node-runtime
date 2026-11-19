@@ -270,7 +270,10 @@ jobs:
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >/dev/null
           scripts/verify-published.sh signature "$image_repository@$digest"
-          scripts/verify-published.sh vuln "$image_repository@$digest"
+          # Stable historical digests carry a v2-format vulnerability
+          # attestation. Explicitly exercise v3's legacy verifier rather
+          # than selecting unrelated modern SLSA/SBOM OCI referrers.
+          scripts/verify-published.sh legacy-vuln "$image_repository@$digest"
 
   check:
     # The one status to require: unit tests, workflow lint, Cosign's real
