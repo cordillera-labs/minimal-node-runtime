@@ -1,28 +1,28 @@
 {
-  "base-files 13.8+deb13u7": {
+  "base-files 13.8+deb13u8": {
     "binaries": [
       "base-files"
     ],
-    "downloaded_from": "https://snapshot.debian.org/archive/debian/20260912T120000Z/",
+    "downloaded_from": "https://snapshot.debian.org/archive/debian/20261121T120000Z/",
     "files": [
       {
-        "asset": "base-files_13.8_deb13u7.dsc",
-        "name": "base-files_13.8+deb13u7.dsc",
-        "sha256": "6240b5a02fc32bd6d925bb7776e00c467e80d930f8cf3c4a20c299ce692dc7e4",
+        "asset": "base-files_13.8_deb13u8.dsc",
+        "name": "base-files_13.8+deb13u8.dsc",
+        "sha256": "034d399f488ceb536a407fd1138eb6b564ec709be4c19f636ff9166bb7295472",
         "size": 1247
       },
       {
-        "asset": "base-files_13.8_deb13u7.tar.xz",
-        "name": "base-files_13.8+deb13u7.tar.xz",
-        "sha256": "be32803b9408ac9aa46b96f68c83ee45e88d04d89854a87999986efc4cb34c69",
-        "size": 83444
+        "asset": "base-files_13.8_deb13u8.tar.xz",
+        "name": "base-files_13.8+deb13u8.tar.xz",
+        "sha256": "a86beb649384499dfa575d52dca5cc8418a51b60b4ea081dd00a68c1abd792c2",
+        "size": 83524
       }
     ],
-    "release": "22.23.4-trixie-2824bdb231d8",
-    "release_url": "https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/22.23.4-trixie-2824bdb231d8",
-    "snapshot": "https://snapshot.debian.org/archive/debian/20260912T120000Z/",
+    "release": "22.23.5-trixie-b83c3eb97534",
+    "release_url": "https://github.com/cordillera-labs/minimal-node-runtime/releases/tag/22.23.5-trixie-b83c3eb97534",
+    "snapshot": "https://snapshot.debian.org/archive/debian/20261121T120000Z/",
     "source": "base-files",
-    "version": "13.8+deb13u7"
+    "version": "13.8+deb13u8"
   },
   "ca-certificates 20250419+deb13u1": {
     "binaries": [
